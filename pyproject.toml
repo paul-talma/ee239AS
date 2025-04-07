@@ -1,0 +1,16 @@
+[project]
+name = "ee-239"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ipykernel>=6.29.5",
+    "ipython>=9.0.2",
+    "jupyter>=1.1.1",
+    "jupyter-client>=8.6.3",
+    "jupytext>=1.16.7",
+    "matplotlib>=3.10.1",
+    "numpy>=2.2.4",
+    "pynvim>=0.5.2",
+]
