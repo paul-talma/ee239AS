@@ -11,3 +11,6 @@ wheels/
 
 test/
 .ipynb_checkpoints/
+*nndl2*
+slides/
+.DS_Store
