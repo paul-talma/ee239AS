@@ -1,14 +1,8 @@
 from __future__ import print_function
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import numpy as np
+from torch import nn
 import torch
-import torch.utils.data
-from torch import nn, optim
-from torch.autograd import Variable
-from torch.nn import functional as F
-from torchvision import datasets, transforms
-from torchvision.utils import save_image
+
+device = torch.device("cpu")
 
 
 def hello_vae():
@@ -18,9 +12,9 @@ def hello_vae():
 class VAE(nn.Module):
     def __init__(self, input_size, latent_size=15):
         super(VAE, self).__init__()
-        self.input_size = input_size # H*W
-        self.latent_size = latent_size # Z
-        self.hidden_dim = None # H_d
+        self.input_size = input_size  # H*W
+        self.latent_size = latent_size  # Z
+        self.hidden_dim = 400  # H_d
         self.encoder = None
         self.mu_layer = None
         self.logvar_layer = None
@@ -35,27 +29,48 @@ class VAE(nn.Module):
         # vectors; the mean and log-variance estimates will both be tensors of shape (N, Z).       #
         ############################################################################################
         # Replace "pass" statement with your code
-        pass
+        self.encoder = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(self.input_size, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ReLU(),
+        )
+
+        self.mu_layer = nn.Linear(self.hidden_dim, self.latent_size)
+        self.logvar_layer = nn.Linear(self.hidden_dim, self.latent_size)
         ############################################################################################
         # TODO: Implement the fully-connected decoder architecture described in the notebook.      #
         # Specifically, self.decoder should be a network that inputs a batch of latent vectors of  #
         # shape (N, Z) and outputs a tensor of estimated images of shape (N, 1, H, W).             #
         ############################################################################################
         # Replace "pass" statement with your code
-        pass
+        self.decoder = nn.Sequential(
+            nn.Linear(self.latent_size, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.input_size),
+            nn.Sigmoid(),
+            nn.Unflatten(dim=1, unflattened_size=(1, 28, 28)),
+        )
+
         ############################################################################################
         #                                      END OF YOUR CODE                                    #
         ############################################################################################
 
-
     def forward(self, x):
         """
-        Performs forward pass through FC-VAE model by passing image through 
+        Performs forward pass through FC-VAE model by passing image through
         encoder, reparametrize trick, and decoder models
-    
+
         Inputs:
         - x: Batch of input images of shape (N, 1, H, W)
-        
+
         Returns:
         - x_hat: Reconstruced input data of shape (N,1,H,W)
         - mu: Matrix representing estimated posterior mu (N, Z), with Z latent space dimension
@@ -71,7 +86,12 @@ class VAE(nn.Module):
         # (3) Pass z through the decoder to resconstruct x                                         #
         ############################################################################################
         # Replace "pass" statement with your code
-        pass
+        output = self.encoder(x)
+        mu = self.mu_layer(output)
+        logvar = self.logvar_layer(output)
+
+        reparametrized_output = reparametrize(mu=mu, logvar=logvar)
+        x_hat = self.decoder(reparametrized_output)
         ############################################################################################
         #                                      END OF YOUR CODE                                    #
         ############################################################################################
@@ -81,10 +101,10 @@ class VAE(nn.Module):
 class CVAE(nn.Module):
     def __init__(self, input_size, num_classes=10, latent_size=15):
         super(CVAE, self).__init__()
-        self.input_size = input_size # H*W
-        self.latent_size = latent_size # Z
-        self.num_classes = num_classes # K
-        self.hidden_dim = None # H_d
+        self.input_size = input_size  # H*W
+        self.latent_size = latent_size  # Z
+        self.num_classes = num_classes  # K
+        self.hidden_dim = None  # H_d
         self.encoder = None
         self.mu_layer = None
         self.logvar_layer = None
@@ -97,27 +117,49 @@ class CVAE(nn.Module):
         # to posterior mu and posterior log-variance estimates of the latent space (N, Z)          #
         ############################################################################################
         # Replace "pass" statement with your code
-        pass
+        self.hidden_dim = 400
+
+        self.encoder = nn.Sequential(
+            nn.Linear(self.input_size + self.num_classes, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ReLU(),
+        )
+        self.mu_layer = nn.Linear(self.hidden_dim, self.latent_size)
+        self.logvar_layer = nn.Linear(self.hidden_dim, self.latent_size)
 
         ############################################################################################
         # TODO: Define a fully-connected decoder as described in the notebook that transforms the  #
         # latent space (N, Z + K) to the estimated images of shape (N, 1, H, W).                   #
         ############################################################################################
         # Replace "pass" statement with your code
-        pass
+
+        self.decoder = nn.Sequential(
+            nn.Linear(self.latent_size + self.num_classes, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.input_size),
+            nn.Sigmoid(),
+            nn.Unflatten(dim=1, unflattened_size=(1, 28, 28)),
+        )
         ############################################################################################
         #                                      END OF YOUR CODE                                    #
         ############################################################################################
 
     def forward(self, x, labels):
         """
-        Performs forward pass through FC-CVAE model by passing image through 
+        Performs forward pass through FC-CVAE model by passing image through
         encoder, reparametrize trick, and decoder models
-    
+
         Inputs:
         - x: Input data for this timestep of shape (N, 1, H, W)
         - labels: One hot vector representing the input class (0-9) (N, K)
-        
+
         Returns:
         - x_hat: Reconstruced input data of shape (N, 1, H, W)
         - mu: Matrix representing estimated posterior mu (N, Z), with Z latent space dimension
@@ -134,12 +176,19 @@ class CVAE(nn.Module):
         # (3) Pass concatenation of z and one hot vectors through the decoder to resconstruct x    #
         ############################################################################################
         # Replace "pass" statement with your code
-        pass
+        flattened = torch.flatten(x, start_dim=1)
+        inputs = torch.cat((flattened, labels), dim=1)
+        output = self.encoder(inputs)
+        mu = self.mu_layer(output)
+        logvar = self.logvar_layer(output)
+
+        z = reparametrize(mu=mu, logvar=logvar)
+        z = torch.cat((z, labels), dim=1)
+        x_hat = self.decoder(z)
         ############################################################################################
         #                                      END OF YOUR CODE                                    #
         ############################################################################################
         return x_hat, mu, logvar
-
 
 
 def reparametrize(mu, logvar):
@@ -160,7 +209,7 @@ def reparametrize(mu, logvar):
     - mu: Tensor of shape (N, Z) giving means
     - logvar: Tensor of shape (N, Z) giving log-variances
 
-    Returns: 
+    Returns:
     - z: Estimated latent vectors, where z[i, j] is a random value sampled from a Gaussian with
          mean mu[i, j] and log-variance logvar[i, j].
     """
@@ -170,7 +219,9 @@ def reparametrize(mu, logvar):
     # posterior mu and sigma to estimate z                                                         #
     ################################################################################################
     # Replace "pass" statement with your code
-    pass
+    epsilon = torch.randn(logvar.shape).to(device)
+    sigma = torch.exp(0.5 * logvar).to(device)
+    z = sigma * epsilon + mu
     ################################################################################################
     #                              END OF YOUR CODE                                                #
     ################################################################################################
@@ -186,7 +237,7 @@ def loss_function(x_hat, x, mu, logvar):
     - x: Input data for this timestep of shape (N, 1, H, W)
     - mu: Matrix representing estimated posterior mu (N, Z), with Z latent space dimension
     - logvar: Matrix representing estimated variance in log-space (N, Z), with Z latent space dimension
-    
+
     Returns:
     - loss: Tensor containing the scalar loss for the negative variational lowerbound
     """
@@ -195,9 +246,17 @@ def loss_function(x_hat, x, mu, logvar):
     # TODO: Compute negative variational lowerbound loss as described in the notebook              #
     ################################################################################################
     # Replace "pass" statement with your code
-    pass
+    reconstruction_loss = (
+        nn.functional.binary_cross_entropy(x_hat, x, reduction="sum") / x_hat.shape[0]
+    )
+
+    kl_loss = -0.5 * torch.mean(
+        torch.sum(1 + logvar - torch.square(mu) - torch.exp(logvar), dim=1)
+    )
+
+    loss = reconstruction_loss + kl_loss
+
     ################################################################################################
     #                            END OF YOUR CODE                                                  #
     ################################################################################################
     return loss
-
