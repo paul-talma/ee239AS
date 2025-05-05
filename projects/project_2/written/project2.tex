@@ -1,0 +1,90 @@
+\documentclass{mathnotes-linalg}
+\newcommand{\cov}[2]{\text{cov} \left ( #1, #2 \right )}
+\newcommand{\normal}[2]{\mathcal N \left ( #1, #2 \right )}
+\newcommand{\ex}[1]{\mathbb E \left [ #1 \right ]}
+
+\begin{document}
+\begin{exe}\
+\begin{enumerate}[(a)]
+	\item 
+		We have $P(\vec x) = P(x_1)P(x_2 | x_1) P (x_3 | x_2) P(x_4 | x_3)$.
+
+	\item 
+		Note that by the definition of the $x_i$, and letting $\omega_t \sim \normal 0 {\sigma^2}$, we have
+		\begin{align*}
+			X_1 &= \omega_1\\
+			X_2 &= X_1 + \omega_2\\
+			X_3 &= X_2 + \omega_3\\
+			X_4 &= X_3 + \omega_4
+		\end{align*}
+		from which we see that the $X_i$ are linear combinations of the $\omega_i$:
+		\begin{align*}
+			X_i = \sum_{1 \leq j \leq i} \omega_j
+		\end{align*}
+		We can represent the $X_i$ compactly as
+		\begin{align*}
+			X &= \begin{pmatrix}
+				X_1 \\ X_2 \\ X_3 \\ X_4
+			\end{pmatrix}\\
+			&= \begin{pmatrix}
+				\omega_1 \\ \omega_1 + \omega_2 \\  \omega_1 + \omega_2 + \omega_3 \\ \omega_1 + \omega_2 + \omega_3 + \omega_4
+			\end{pmatrix}\\
+			&= \begin{pmatrix}
+				1 & 0 & 0 & 0 \\
+				1 & 1 & 0 & 0 \\
+				1 & 1 & 1 & 0 \\
+				1 & 1 & 1 & 1
+			\end{pmatrix}
+			\begin{pmatrix}
+				\omega_1\\
+				\omega_2\\
+				\omega_3\\
+				\omega_4
+			\end{pmatrix}\\
+			&=: A \vec \omega
+		\end{align*}
+
+		As a result, the covariance matrix is 
+		\begin{align*}
+			A \cdot \text{ cov}( \vec \omega)\cdot  A^\top
+			&= A \cdot \sigma^2 I_4 \cdot  A^\top\\
+			&= \sigma^2 A \cdot  A^\top\\
+			&= \sigma^2 \begin{pmatrix}
+				1 & 0 & 0 & 0 \\
+				1 & 1 & 0 & 0 \\
+				1 & 1 & 1 & 0 \\
+				1 & 1 & 1 & 1
+			\end{pmatrix}
+			\begin{pmatrix}
+				1 & 1 & 1 & 1 \\
+				0 & 1 & 1 & 1 \\
+				0 & 0 & 1 & 1 \\
+				0 & 0 & 0 & 1
+			\end{pmatrix}\\
+			&= \sigma^2 \begin{pmatrix}
+				1 & 1 & 1 & 1 \\
+				1 & 2 & 2 & 2 \\
+				1 & 2 & 3 & 3 \\
+				1 & 2 & 3 & 4
+			\end{pmatrix}
+		\end{align*}
+
+
+	\item 
+		Using standard techniques for matrix inversion, we compute the following inverse:
+		\begin{align*}
+			A^{-1} &= \frac 1 {\sigma^2}
+			\begin{pmatrix}
+				2 & -1 & 0 &0 \\
+				-1 & 2 & -1 & 0 \\
+				0 & -1 & 2 & -1 \\
+				0 & 0 & -1 & 1
+			\end{pmatrix}
+		\end{align*}
+
+	\item 
+		We observe that $A^{-1}_{ij} = 0$ iff $i \neq j$ and $x_i$ and $x_j$ are not adjacent in (the undirected version of) graph.
+
+\end{enumerate}	
+\end{exe}	
+\end{document}
