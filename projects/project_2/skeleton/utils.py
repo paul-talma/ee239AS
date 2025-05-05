@@ -13,7 +13,14 @@ from torch.utils.data import DataLoader
 
 
 torch.manual_seed(0)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device(
+    "mps"
+    if torch.mps.is_available()
+    else "cuda"
+    if torch.cuda.is_available()
+    else "cpu"
+)
+print(f"Using device: {device}")
 
 
 @dataclass
@@ -102,13 +109,14 @@ def check_forward(dataloader, dmconfig, device):
     return model
 
 
+@torch.no_grad()
 def check_sample(model, dmconfig, device):
     model.eval()
     num_classes = dmconfig.num_classes
     omega = dmconfig.omega
     T = dmconfig.T
     conditions = torch.arange(0, num_classes).to(device)
-    conditions = torch.tile(conditions, [10, 1]).T.reshape((-1,))
+    conditions = torch.tile(conditions, [10, 1]).T.reshape((-1,)).to(device)
     # conditions_1hot = F.one_hot(conditions, num_classes = num_classes)
     generated_images = model.sample(conditions, omega).cpu()
 
@@ -125,22 +133,24 @@ def check_sample(model, dmconfig, device):
     return fig
 
 
+@torch.no_grad()
 def sample_images(config, checkpoint_path):
     num_classes = config.num_classes
     omega = config.omega
     T = config.T
     model = ConditionalDDPM(dmconfig=config).to(device)
-    ckpt = torch.load(checkpoint_path)
+    ckpt = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
     conditions = torch.arange(0, num_classes).to(device)
-    conditions = torch.tile(conditions, [10, 1]).T.reshape((-1,))
+    conditions = torch.tile(conditions, [10, 1]).T.reshape((-1,)).to(device)
     generated_images = model.sample(conditions, omega)
     generated_images = make_grid(generated_images, nrow=10, padding=0)
     generated_images = generated_images.permute(1, 2, 0).cpu().numpy()
     return generated_images
 
 
+@torch.no_grad()
 def plot_images(model, num_classes, omega, T):
     model.eval()
     conditions = torch.arange(0, num_classes).to(device)

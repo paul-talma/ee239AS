@@ -2,6 +2,14 @@ import torch
 import numpy as np
 import torch.nn as nn
 
+device = torch.device(
+    "mps"
+    if torch.mps.is_available()
+    else "cuda"
+    if torch.cuda.is_available()
+    else "cpu"
+)
+
 
 class ResConvBlock(nn.Module):
     """
@@ -184,8 +192,8 @@ class ConditionalUnet(nn.Module):
         up1 = self.upblock1(up0, fus2)
         fus3 = self.fusion3(up1, temb2, cemb2)
         up2 = self.upblock2(fus3, fus1)
-        out = self.outblock(torch.cat((up2, down0), dim=1))
+        fus4 = self.fusion4(up2, temb2, cemb2)
+        out = self.outblock(torch.cat((fus4, down0), dim=1))
         # ==================================================== #
 
         return out
-
