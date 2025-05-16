@@ -168,9 +168,7 @@ def solver(model_name):
             ### ======== TODO : END ========= ###
 
             print(
-                f"Iteration {i}, Train Loss: {train_loss}",
-                f"Eval Loss: {eval_loss}",
-                f"Average eval loss: {eval_loss / max_iter_eval}",
+                f"Iteration {i}\nTrain Loss: {train_loss}\nAverage eval loss: {eval_loss / max_iter_eval}",
             )
 
             if config.to_log:
