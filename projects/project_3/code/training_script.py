@@ -12,4 +12,4 @@ device = torch.device(
 )
 
 
-solver(model_name="minigpt")
+solver(model_name="bigram")

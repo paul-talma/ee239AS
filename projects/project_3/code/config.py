@@ -17,8 +17,8 @@ class BigramConfig:
     vocab_size: int = 50257
     embed_dim: int = 32
     dropout: float = 0.1
-    save_iterations: int = 10000
-    max_iter: int = 500000
+    save_iterations: int = 10_000
+    max_iter: int = 500_000
     learning_rate: float = 1e-4
 
 

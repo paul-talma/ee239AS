@@ -16,18 +16,14 @@ from dataset import TinyStoriesDataset
 from config import BigramConfig, MiniGPTConfig
 
 
-debug_config = BigramConfig(to_log=False, log_interval=100_000)
-
-
 def solver(model_name):
     # Initialize the model
     if model_name == "bigram":
-        # config = BigramConfig
-        config = debug_config
+        config = BigramConfig(to_log=True, log_interval=10_000)
         model = BigramLanguageModel(config)
     elif model_name == "minigpt":
         config = MiniGPTConfig(
-            to_log=False, save_iterations=100_000, log_interval=100_000
+            to_log=True, save_iterations=100_000, log_interval=100_000
         )
         model = MiniGPT(config)
     else:
@@ -73,7 +69,7 @@ def solver(model_name):
             project="dl2_proj3",
             config={
                 "learning_rate": config.learning_rate,
-                "architecture": "Bigram",
+                "architecture": model_name,
                 "dataset": "TinyStories",
             },
         )
@@ -118,13 +114,13 @@ def solver(model_name):
     model.train()
     model.to(device)
 
-    max_iter_train = len(train_dataloader) - 1
-    max_iter_eval = len(eval_dataloader) // 1000
+    max_iter_eval = len(eval_dataloader) // 500
 
     for i, (context, target) in tqdm(enumerate(train_dataloader)):
         context = context.to(device)
         target = target.to(device)
         train_loss = 0  # You can use this variable to store the training loss for the current iteration
+
         ### ======== TODO : START ========= ###
         # Do the forward pass, compute the loss, do the backward pass, and update the weights with the optimizer.
 
@@ -132,10 +128,14 @@ def solver(model_name):
         logits = model(context)
 
         target = target.long()
-        B, T, _ = logits.shape
 
-        logits = logits.reshape(B * T, -1)
-        target = target.reshape(B * T)
+        if model_name == "bigram":
+            target = target.squeeze()
+
+        elif model_name == "minigpt":
+            B, T, _ = logits.shape
+            logits = logits.reshape(B * T, -1)
+            target = target.reshape(B * T)
 
         batch_loss = loss(logits, target)
 
@@ -143,9 +143,6 @@ def solver(model_name):
         optimizer.step()
 
         train_loss += batch_loss.item()
-
-        if config.to_log:
-            wandb.log({"train_loss": train_loss})
 
         ### ======== TODO : END ========= ###
 
@@ -157,6 +154,7 @@ def solver(model_name):
         if i % config.log_interval == 0:
             model.eval()
             eval_loss = 0  # You can use this variable to store the evaluation loss for the current iteration
+
             ### ======== TODO : START ========= ###
             # Compute the evaluation loss on the eval dataset.
 
@@ -168,8 +166,12 @@ def solver(model_name):
                     target = target.long()
                     logits = model(context)
 
-                    logits = logits.reshape(B * T, -1)
-                    target = target.reshape(B * T)
+                    if model_name == "bigram":
+                        target = target.squeeze()
+
+                    elif model_name == "minigpt":
+                        logits = logits.reshape(B * T, -1)
+                        target = target.reshape(B * T)
 
                     batch_loss = loss(logits, target)
                     eval_loss += batch_loss.item()

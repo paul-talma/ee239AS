@@ -112,19 +112,18 @@ class BigramLanguageModel(nn.Module):
 
         ### ========= TODO : START ========= ###
 
-        f = nn.Softmax()
+        f = torch.softmax
         context = torch.tensor(context, device=device)
         current_token = context[-1]
-        output = []
         for _ in range(max_new_tokens):
             logits = self.forward(
                 torch.tensor([current_token], device=device)
-            )  # TODO: check dimensionality of input
-            probabilities = f(logits)
+            ).squeeze()
+            probabilities = f(logits, dim=0)
             current_token = torch.multinomial(probabilities, 1).to(device)
-            output.append(current_token.item())
+            context = torch.cat((context, current_token), dim=0)
 
-        return output
+        return context
         ### ========= TODO : END ========= ###
 
 
@@ -494,6 +493,7 @@ class MiniGPT(nn.Module):
         NOTE: You do not need to modify anything here.
         """
 
+        self.context_length = config.context_length
         self.vocab_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
         self.positional_embedding = nn.Embedding(
             config.context_length, config.embed_dim
@@ -601,6 +601,270 @@ class MiniGPT(nn.Module):
 
         ### ========= TODO : START ========= ###
 
-        raise NotImplementedError
+        f = torch.softmax
+        context = torch.tensor(context, device=device).unsqueeze(0)
+        for i in range(max_new_tokens):
+            current_context = context[:, -(self.context_length) :]
+            logits = self(current_context)
+            next_token_logits = logits[:, -1, :]
+            next_token_probabilities = f(next_token_logits, dim=-1)
+            current_token = torch.multinomial(
+                input=next_token_probabilities, num_samples=1
+            ).to(device)
+            context = torch.cat((context, current_token), dim=1)
+
+        return context
 
         ### ========= TODO : END ========= ###
+
+
+class SingleHeadGeneralAttention(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        output_key_query_dim=None,
+        output_value_dim=None,
+        dropout=0.1,
+        max_len=512,
+    ):
+        super().__init__()
+
+        self.input_dim = input_dim
+        if output_key_query_dim:
+            self.output_key_query_dim = output_key_query_dim
+        else:
+            self.output_key_query_dim = input_dim
+
+        if output_value_dim:
+            self.output_value_dim = output_value_dim
+        else:
+            self.output_value_dim = input_dim
+
+        causal_mask = None  # You have to implement this, currently just a placeholder
+
+        self.key = nn.Linear(
+            self.input_dim, self.output_key_query_dim, bias=False, device=device
+        )
+        self.query = nn.Linear(
+            self.input_dim, self.output_key_query_dim, bias=False, device=device
+        )
+        self.value = nn.Linear(
+            self.input_dim, self.output_value_dim, bias=False, device=device
+        )
+
+        self.dropout = nn.Dropout(p=dropout)
+
+        causal_mask = torch.ones((max_len, max_len), device=device)
+        causal_mask *= -float("inf")
+        causal_mask = torch.triu(causal_mask, 1)
+
+        self.register_buffer(
+            "causal_mask", causal_mask
+        )  # Registering as buffer to avoid backpropagation
+
+    def forward(self, x_query, x_key, x_value):
+        _, num_tokens, _ = x_query.shape
+        dk = self.output_key_query_dim
+        K = self.key(x_key)  # (B, T, Dk)
+        Q = self.query(x_query)  # (B, T, Dk)
+        V = self.value(x_value)  # (B, T, Dv)
+
+        attention_scores = Q @ K.transpose(-2, -1)  # (B, T, T)
+        attention_scores /= math.sqrt(dk)  # (B, T, T)
+
+        mask = self.causal_mask[:num_tokens, :num_tokens]  # (T, T)
+        mask = mask.unsqueeze(0)
+        mask = mask.type(torch.bool)
+        mask = torch.where(mask, -torch.inf, 0)
+
+        attention_scores += mask  # (B, T, T)
+
+        attention_weights = torch.softmax(attention_scores, dim=-1)  # (B, T, T)
+        attention_weights = self.dropout(attention_weights)  # (B, T, T)
+
+        out = attention_weights @ V  # (B, T, Dv)
+        return out
+
+
+class MultiHeadGeneralAttention(nn.Module):
+    def __init__(self, input_dim, num_heads, dropout=0.1) -> None:
+        super().__init__()
+
+        self.input_dim = input_dim
+        self.num_heads = num_heads
+        self.head_dim = input_dim // num_heads
+
+        self.heads = []
+        for i in range(num_heads):
+            head = SingleHeadGeneralAttention(
+                input_dim=input_dim,
+                output_key_query_dim=self.head_dim,
+                output_value_dim=self.head_dim,
+            )
+            setattr(self, f"head_{i}", head)
+            self.heads.append(head)
+
+        self.out = nn.Linear(self.input_dim, self.input_dim)
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, x_query, x_key, x_value):
+        head_outputs = []
+        for head in self.heads:
+            head_outputs.append(head(x_query, x_key, x_value))
+
+        out = self.out(torch.cat(head_outputs, dim=-1))
+        out = self.dropout(out)
+        return out
+
+
+class GeneralTransformerLayer(nn.Module):
+    def __init__(self, input_dim, num_heads, feedforward_dim=None):
+        super().__init__()
+
+        self.norm1 = LayerNorm(normalized_shape=input_dim)
+        self.attention = MultiHeadGeneralAttention(
+            input_dim=input_dim, num_heads=num_heads
+        )
+        self.norm2 = LayerNorm(normalized_shape=input_dim)
+        self.feedforward = FeedForwardLayer(
+            input_dim=input_dim, feedforward_dim=feedforward_dim
+        )
+
+    def forward(self, x):
+        intermediate = self.norm1(x)
+        intermediate = self.attention(intermediate)
+        intermediate += x
+        out = self.norm2(intermediate)
+        out = self.feedforward(out)
+        out += intermediate
+
+        return out
+
+
+class Encoder(nn.Module):
+    def __init__(self, config) -> None:
+        super().__init__()
+
+        self.context_length = config.context_length
+        self.vocab_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
+        self.positional_embedding = nn.Embedding(
+            config.context_length, config.embed_dim
+        )
+        self.embed_dropout = nn.Dropout(config.embed_dropout)
+
+        self.transformer_layers = nn.ModuleList(
+            [
+                TransformerLayer(
+                    config.embed_dim, config.num_heads, config.feedforward_size
+                )
+                for _ in range(config.num_layers)
+            ]
+        )
+
+        # precreate positional indices for the positional embedding
+        pos = torch.arange(0, config.context_length, dtype=torch.long)
+        self.register_buffer("pos", pos, persistent=False)
+
+        self.apply(self._init_weights)
+
+    def forward(self, x):
+        B, T = x.shape
+
+        # embeddings
+        token_embeds = self.vocab_embedding(x)
+        position_embeds = self.positional_embedding(self.pos[:T])
+        position_embeds = position_embeds.unsqueeze(dim=0)
+        x = token_embeds + position_embeds
+        x = self.embed_dropout(x)
+
+        # attention layers
+        for layer in self.transformer_layers:
+            x = layer(x)
+
+        return x
+
+
+class Decoder(nn.Module):
+    def __init__(self, config) -> None:
+        super().__init__()
+
+        self.context_length = config.context_length
+        self.vocab_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
+        self.positional_embedding = nn.Embedding(
+            config.context_length, config.embed_dim
+        )
+        self.embed_dropout = nn.Dropout(config.embed_dropout)
+
+        self.decoder_layers = nn.ModuleList(
+            [
+                TransformerLayer(
+                    config.embed_dim, config.num_heads, config.feedforward_size
+                )
+                for _ in range(config.num_layers)
+            ]
+        )
+
+        # prehead layer norm
+        self.prehead_norm = LayerNorm(config.embed_dim)
+
+        self.head = nn.Linear(
+            config.embed_dim, config.vocab_size
+        )  # Language modelling head
+
+        if config.weight_tie:
+            self.head.weight = self.vocab_embedding.weight
+
+        # precreate positional indices for the positional embedding
+        pos = torch.arange(0, config.context_length, dtype=torch.long)
+        self.register_buffer("pos", pos, persistent=False)
+
+        self.apply(self._init_weights)
+
+    def forward(self, x, encoder_output):
+        B, T = x.shape
+
+        # embeddings
+        token_embeds = self.vocab_embedding(x)
+        position_embeds = self.positional_embedding(self.pos[:T])
+        position_embeds = position_embeds.unsqueeze(dim=0)
+        x = token_embeds + position_embeds
+        x = self.embed_dropout(x)
+
+        # attention layers
+        for layer in self.decoder_layers:
+            x = layer(x_query=x, x_key=encoder_output, x_value=encoder_output)
+
+        # language modeling head
+        x = self.prehead_norm(x)
+        logits = self.head(x)
+
+        return logits
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            if module._get_name() == "fc2":
+                # GPT-2 style FFN init
+                torch.nn.init.normal_(
+                    module.weight, mean=0.0, std=0.02 / math.sqrt(2 * self.num_layers)
+                )
+            else:
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def generate(self, context, max_new_tokens=100):
+        f = torch.softmax
+        context = torch.tensor(context, device=device).unsqueeze(0)
+        for i in range(max_new_tokens):
+            current_context = context[:, -(self.context_length) :]
+            logits = self(current_context)
+            next_token_logits = logits[:, -1, :]
+            next_token_probabilities = f(next_token_logits, dim=-1)
+            current_token = torch.multinomial(
+                input=next_token_probabilities, num_samples=1
+            ).to(device)
+            context = torch.cat((context, current_token), dim=1)
+
+        return context
