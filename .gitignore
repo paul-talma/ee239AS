@@ -20,3 +20,4 @@ pretrained*
 wandb/
 models/
 test*
+MNIST/
