@@ -112,8 +112,19 @@ class BigramLanguageModel(nn.Module):
 
         ### ========= TODO : START ========= ###
 
-        raise NotImplementedError
+        f = nn.Softmax()
+        context = torch.tensor(context, device=device)
+        current_token = context[-1]
+        output = []
+        for _ in range(max_new_tokens):
+            logits = self.forward(
+                torch.tensor([current_token], device=device)
+            )  # TODO: check dimensionality of input
+            probabilities = f(logits)
+            current_token = torch.multinomial(probabilities, 1).to(device)
+            output.append(current_token.item())
 
+        return output
         ### ========= TODO : END ========= ###
 
 
@@ -166,11 +177,21 @@ class SingleHeadAttention(nn.Module):
 
         # ========= TODO : START ========= #
 
-        self.key = ...
-        self.query = ...
-        self.value = ...
-        self.dropout = ...
-        causal_mask = ...
+        self.key = nn.Linear(
+            self.input_dim, self.output_key_query_dim, bias=False, device=device
+        )
+        self.query = nn.Linear(
+            self.input_dim, self.output_key_query_dim, bias=False, device=device
+        )
+        self.value = nn.Linear(
+            self.input_dim, self.output_value_dim, bias=False, device=device
+        )
+
+        self.dropout = nn.Dropout(p=dropout)
+
+        causal_mask = torch.ones((max_len, max_len), device=device)
+        causal_mask *= -float("inf")
+        causal_mask = torch.triu(causal_mask, 1)
 
         # ========= TODO : END ========= #
 
@@ -196,8 +217,28 @@ class SingleHeadAttention(nn.Module):
 
         # ========= TODO : START ========= #
 
-        raise NotImplementedError
+        _, num_tokens, _ = x.shape
+        dk = self.output_key_query_dim
+        K = self.key(x)  # (B, T, Dk)
+        Q = self.query(x)  # (B, T, Dk)
+        V = self.value(x)  # (B, T, Dv)
 
+        attention_scores = Q @ K.transpose(-2, -1)  # (B, T, T)
+        attention_scores /= math.sqrt(dk)  # (B, T, T)
+
+        mask = self.causal_mask[:num_tokens, :num_tokens]  # (T, T)
+        mask = mask.unsqueeze(0)  # not sure this is necessary # (1, T, T)
+        mask = mask.type(torch.bool)
+
+        mask = torch.where(mask, -torch.inf, 0)
+
+        attention_scores += mask  # (B, T, T)
+
+        attention_weights = torch.softmax(attention_scores, dim=-1)  # (B, T, T)
+        attention_weights = self.dropout(attention_weights)  # (B, T, T)
+
+        out = attention_weights @ V  # (B, T, Dv)
+        return out
         # ========= TODO : END ========= #
 
 
@@ -223,10 +264,20 @@ class MultiHeadAttention(nn.Module):
 
         self.input_dim = input_dim
         self.num_heads = num_heads
+        self.head_dim = input_dim // num_heads
 
-        # self.head_{i} = ... # Use setattr to implement this dynamically, this is used as a placeholder
-        self.out = ...
-        self.dropout = ...
+        self.heads = []
+        for i in range(num_heads):
+            head = SingleHeadAttention(
+                input_dim=input_dim,
+                output_key_query_dim=self.head_dim,
+                output_value_dim=self.head_dim,
+            )
+            setattr(self, f"head_{i}", head)
+            self.heads.append(head)
+
+        self.out = nn.Linear(self.input_dim, self.input_dim)
+        self.dropout = nn.Dropout(p=dropout)
 
         # ========= TODO : END ========= #
 
@@ -245,7 +296,13 @@ class MultiHeadAttention(nn.Module):
 
         # ========= TODO : START ========= #
 
-        raise NotImplementedError
+        head_outputs = []
+        for head in self.heads:
+            head_outputs.append(head(x))
+
+        out = self.out(torch.cat(head_outputs, dim=-1))
+        out = self.dropout(out)
+        return out
 
         # ========= TODO : END ========= #
 
@@ -274,11 +331,10 @@ class FeedForwardLayer(nn.Module):
 
         # ========= TODO : START ========= #
 
-        self.fc1 = ...
-        self.activation = ...
-        self.fc2 = ...
-        self.fc2 = ...
-        self.dropout = ...
+        self.fc1 = nn.Linear(input_dim, feedforward_dim, bias=True)
+        self.activation = nn.GELU()
+        self.fc2 = nn.Linear(feedforward_dim, input_dim, bias=True)
+        self.dropout = nn.Dropout(dropout)
 
         # ========= TODO : END ========= #
 
@@ -297,7 +353,11 @@ class FeedForwardLayer(nn.Module):
 
         ### ========= TODO : START ========= ###
 
-        raise NotImplementedError
+        out = self.fc1(x)
+        out = self.activation(out)
+        out = self.fc2(out)
+        out = self.dropout(out)
+        return out
 
         ### ========= TODO : END ========= ###
 
@@ -340,7 +400,8 @@ class LayerNorm(nn.Module):
         var = None
         # ========= TODO : START ========= #
 
-        raise NotImplementedError
+        mean = torch.mean(input, dim=2, keepdim=True)
+        var = torch.var(input, dim=2, keepdim=True, correction=0)
 
         # ========= TODO : END ========= #
 
@@ -374,10 +435,12 @@ class TransformerLayer(nn.Module):
 
         # ========= TODO : START ========= #
 
-        self.norm1 = ...
-        self.attention = ...
-        self.norm2 = ...
-        self.feedforward = ...
+        self.norm1 = LayerNorm(normalized_shape=input_dim)
+        self.attention = MultiHeadAttention(input_dim=input_dim, num_heads=num_heads)
+        self.norm2 = LayerNorm(normalized_shape=input_dim)
+        self.feedforward = FeedForwardLayer(
+            input_dim=input_dim, feedforward_dim=feedforward_dim
+        )
 
         # ========= TODO : END ========= #
 
@@ -396,7 +459,14 @@ class TransformerLayer(nn.Module):
 
         # ========= TODO : START ========= #
 
-        raise NotImplementedError
+        intermediate = self.norm1(x)
+        intermediate = self.attention(intermediate)
+        intermediate += x
+        out = self.norm2(intermediate)
+        out = self.feedforward(out)
+        out += intermediate
+
+        return out
 
         # ========= TODO : END ========= #
 
@@ -475,7 +545,24 @@ class MiniGPT(nn.Module):
 
         ### ========= TODO : START ========= ###
 
-        raise NotImplementedError
+        B, T = x.shape
+
+        # embeddings
+        token_embeds = self.vocab_embedding(x)
+        position_embeds = self.positional_embedding(self.pos[:T])
+        position_embeds = position_embeds.unsqueeze(dim=0)
+        x = token_embeds + position_embeds
+        x = self.embed_dropout(x)
+
+        # attention layers
+        for layer in self.transformer_layers:
+            x = layer(x)
+
+        # language modeling head
+        x = self.prehead_norm(x)
+        logits = self.head(x)
+
+        return logits
 
         ### ========= TODO : END ========= ###
 

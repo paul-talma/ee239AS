@@ -1,11 +1,18 @@
-from pathlib import Path
-
 import torch
 import numpy as np
 
 
-def check_singleheadattention(model, checkpoint_file, device="cpu"):
+def print_tensor_devices(model):
+    print("Parameters:")
+    for name, param in model.named_parameters():
+        print(f"{name}: {param.device}")
 
+    print("\nBuffers:")
+    for name, buf in model.named_buffers():
+        print(f"{name}: {buf.device}")
+
+
+def check_singleheadattention(model, checkpoint_file, device="mps"):
     model.to(device)
     model.eval()
     data_file = "./test_cases.npz"
@@ -14,7 +21,6 @@ def check_singleheadattention(model, checkpoint_file, device="cpu"):
     ckpt = torch.load(checkpoint_file, map_location=device)
 
     with torch.no_grad():
-
         model.key.weight.copy_(
             ckpt["model_state_dict"]["transformer_layers.0.attention.head_0.key.weight"]
         )
@@ -40,13 +46,13 @@ def check_singleheadattention(model, checkpoint_file, device="cpu"):
     old_input = old_input.to(device)
     old_output = old_output.to(device)
     check_output = model(old_input)
+
     assert torch.allclose(check_output, old_output, atol=1e-5), "TEST CASE FAILED"
 
     return "TEST CASE PASSED!!!"
 
 
 def check_multiheadattention(model, checkpoint_file, device="cpu"):
-
     model.to(device)
     model.eval()
     data_file = "./test_cases.npz"
@@ -151,7 +157,6 @@ def check_multiheadattention(model, checkpoint_file, device="cpu"):
 
 
 def check_feedforward(model, checkpoint_file, device="cpu"):
-
     model.to(device)
     model.eval()
     data_file = "./test_cases.npz"
@@ -160,7 +165,6 @@ def check_feedforward(model, checkpoint_file, device="cpu"):
     ckpt = torch.load(checkpoint_file, map_location=device)
 
     with torch.no_grad():
-
         model.fc1.weight.copy_(
             ckpt["model_state_dict"]["transformer_layers.0.feedforward.fc1.weight"]
         )
@@ -187,7 +191,6 @@ def check_feedforward(model, checkpoint_file, device="cpu"):
 
 
 def check_layernorm(model, checkpoint_file, device="cpu"):
-
     model.to(device)
     model.eval()
     data_file = "./test_cases.npz"
@@ -196,7 +199,6 @@ def check_layernorm(model, checkpoint_file, device="cpu"):
     ckpt = torch.load(checkpoint_file, map_location=device)
 
     with torch.no_grad():
-
         model.gamma.copy_(ckpt["model_state_dict"]["transformer_layers.0.norm1.gamma"])
 
         model.beta.copy_(ckpt["model_state_dict"]["transformer_layers.0.norm1.gamma"])
@@ -213,7 +215,6 @@ def check_layernorm(model, checkpoint_file, device="cpu"):
 
 
 def check_miniGPT(model, checkpoint_file, device="cpu"):
-
     model.to(device)
     model.eval()
     data_file = "./test_cases.npz"
@@ -234,7 +235,6 @@ def check_miniGPT(model, checkpoint_file, device="cpu"):
 
 
 def check_transformer(model, checkpoint_file, device="cpu"):
-
     model.to(device)
     model.eval()
     data_file = "./test_cases.npz"
@@ -365,7 +365,6 @@ def check_transformer(model, checkpoint_file, device="cpu"):
 
 
 def check_bigram(model, checkpoint_file, device="cpu"):
-
     model.to(device)
     model.eval()
     data_file = "./test_cases.npz"

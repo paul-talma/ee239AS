@@ -9,23 +9,26 @@ import torch.nn.utils
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import wandb
+from tqdm import tqdm
 
 from model import BigramLanguageModel, MiniGPT
 from dataset import TinyStoriesDataset
 from config import BigramConfig, MiniGPTConfig
 
 
-debug_config = BigramConfig(to_log=True, log_interval=100_000)
+debug_config = BigramConfig(to_log=False, log_interval=100_000)
 
 
 def solver(model_name):
     # Initialize the model
     if model_name == "bigram":
-        config = BigramConfig
-        # config = debug_config
+        # config = BigramConfig
+        config = debug_config
         model = BigramLanguageModel(config)
     elif model_name == "minigpt":
-        config = MiniGPTConfig
+        config = MiniGPTConfig(
+            to_log=False, save_iterations=100_000, log_interval=100_000
+        )
         model = MiniGPT(config)
     else:
         raise ValueError("Invalid model name")
@@ -116,9 +119,9 @@ def solver(model_name):
     model.to(device)
 
     max_iter_train = len(train_dataloader) - 1
-    max_iter_eval = len(eval_dataloader) - 1
+    max_iter_eval = len(eval_dataloader) // 1000
 
-    for i, (context, target) in enumerate(train_dataloader):
+    for i, (context, target) in tqdm(enumerate(train_dataloader)):
         context = context.to(device)
         target = target.to(device)
         train_loss = 0  # You can use this variable to store the training loss for the current iteration
@@ -126,17 +129,23 @@ def solver(model_name):
         # Do the forward pass, compute the loss, do the backward pass, and update the weights with the optimizer.
 
         model.zero_grad()
-        scores = model(context)
+        logits = model(context)
 
-        target = target.squeeze(1).long()
-        batch_loss = loss(scores, target)
+        target = target.long()
+        B, T, _ = logits.shape
+
+        logits = logits.reshape(B * T, -1)
+        target = target.reshape(B * T)
+
+        batch_loss = loss(logits, target)
 
         batch_loss.backward()
         optimizer.step()
 
         train_loss += batch_loss.item()
 
-        wandb.log({"train_loss": train_loss})
+        if config.to_log:
+            wandb.log({"train_loss": train_loss})
 
         ### ======== TODO : END ========= ###
 
@@ -156,9 +165,13 @@ def solver(model_name):
                     context = context.to(device)
                     target = target.to(device)
 
-                    target = target.squeeze(1).long()
-                    scores = model(context)
-                    batch_loss = loss(scores, target)
+                    target = target.long()
+                    logits = model(context)
+
+                    logits = logits.reshape(B * T, -1)
+                    target = target.reshape(B * T)
+
+                    batch_loss = loss(logits, target)
                     eval_loss += batch_loss.item()
                     del context, target  # Clear memory
 
@@ -167,8 +180,9 @@ def solver(model_name):
 
             ### ======== TODO : END ========= ###
 
+            eval_loss /= max_iter_eval
             print(
-                f"Iteration {i}\nTrain Loss: {train_loss}\nAverage eval loss: {eval_loss / max_iter_eval}",
+                f"Iteration {i}\nTrain Loss: {train_loss}\nAverage eval loss: {eval_loss}",
             )
 
             if config.to_log:

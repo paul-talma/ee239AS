@@ -48,7 +48,7 @@ class MiniGPTConfig:
     log_interval: int = 10
     save_path: Path = Path("models/minigpt/")
     save_iterations: int = 10000
-    to_log: bool = True
+    to_log: bool = False
     max_iter: int = 500000
     to_clip_grad: bool = False
     gradient_clip: float = 1.0
