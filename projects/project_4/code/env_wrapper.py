@@ -1,19 +1,16 @@
-import cv2
 import numpy as np
 import gymnasium as gym
-import matplotlib.pyplot as plt
-from utils import preprocess #this is a helper function that may be useful to grayscale and crop the image
 
 
 class EnvWrapper(gym.Wrapper):
     def __init__(
         self,
-        env:gym.Env,
-        skip_frames:int=4,
-        stack_frames:int=4,
-        initial_no_op:int=50,
-        do_nothing_action:int=0,
-        **kwargs
+        env: gym.Env,
+        skip_frames: int = 4,
+        stack_frames: int = 4,
+        initial_no_op: int = 50,
+        do_nothing_action: int = 0,
+        **kwargs,
     ):
         """
         Gym Wrapper for CarRacing-v3 that adds frame-skipping, frame-stacking,
@@ -22,10 +19,10 @@ class EnvWrapper(gym.Wrapper):
         Args:
             env (gym.Env): the original environment
             skip_frames (int, optional): the number of frames to skip, in other words we will repeat the same action for `skip_frames` steps.
-            stack_frames (int, optional): the number of frames to stack as a state, we stack 
+            stack_frames (int, optional): the number of frames to stack as a state, we stack
             `stack_frames` frames to form the state and allow agent understand the motion of the car. Defaults to 4.
             initial_no_op (int, optional): the initial number of no-op steps to do nothing at the beginning of the episode. Defaults to 50.
-            do_nothing_action (int, optional): the action index for doing nothing. Defaults to 0, which should be correct unless you have modified the 
+            do_nothing_action (int, optional): the action index for doing nothing. Defaults to 0, which should be correct unless you have modified the
             discretization of the action space.
         """
         super().__init__(env, **kwargs)
@@ -33,15 +30,10 @@ class EnvWrapper(gym.Wrapper):
         self.skip_frames = skip_frames
         self.stack_frames = stack_frames
         self.observation_space = gym.spaces.Box(
-            low=0,
-            high=1,
-            shape=(stack_frames, 84, 84),
-            dtype=np.float32
+            low=0, high=1, shape=(stack_frames, 84, 84), dtype=np.float32
         )
         self.do_nothing_action = do_nothing_action
-        
-    
-    
+
     def reset(self, **kwargs):
         """
         Reset the environment and perform a sequence of no-op actions before
@@ -58,14 +50,25 @@ class EnvWrapper(gym.Wrapper):
         # 3. crop and resize the final frame
         # 4. stack the frames to form the initial state
         # ====================================
-        raise NotImplementedError("reset in env_wrapper not implemented")
-    
+        obs, info = self.env.reset()
+        last_frames = []
+        for _ in range(self.initial_no_op - 4):
+            obs, reward, terminated, truncated, info = self.env.step(
+                self.do_nothing_action
+            )
 
+        for _ in range(4):
+            obs, reward, terminated, truncated, info = self.env.step(
+                self.do_nothing_action
+            )
+            obs = obs[:, :-4]
+            last_frames.append(obs)
 
+        self.stacked_state = np.array(last_frames)
         # ========== YOUR CODE ENDS ==========
 
         return self.stacked_state, info
-    
+
     def step(self, action):
         """
         Apply the given action with frame-skipping, accumulate rewards,
@@ -89,10 +92,7 @@ class EnvWrapper(gym.Wrapper):
         # 4. append new frame to `self.stacked_state` and remove oldest.
         # ====================================
         raise NotImplementedError("step in env_wrapper not implemented")
-    
-    
 
         # ========== YOUR CODE ENDS ==========
         return self.stacked_state, reward, terminated, truncated, info
-    
-   
+
