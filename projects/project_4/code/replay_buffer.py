@@ -1,16 +1,23 @@
-import random 
-import torch 
+import torch
+import random
 import numpy as np
 
+
 class ReplayBufferDQN:
-    def __init__(self, buffer_size:int, seed:int=42):
+    def __init__(self, buffer_size: int, seed: int = 42):
         self.buffer_size = buffer_size
         self.seed = seed
         self.buffer = []
         random.seed(self.seed)
-    
-    def add(self, state:np.ndarray, action:int, reward:float, next_state:np.ndarray
-            , done:bool):
+
+    def add(
+        self,
+        state: np.ndarray,
+        action: int,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+    ):
         """
         Add a new experience to the buffer
 
@@ -24,9 +31,8 @@ class ReplayBufferDQN:
         self.buffer.append((state, action, reward, next_state, done))
         if len(self.buffer) > self.buffer_size:
             self.buffer.pop(0)
-        
-    
-    def sample(self, batch_size:int, device='cpu'):
+
+    def sample(self, batch_size: int, device="cpu"):
         """
         Randomly sample a batch of experiences from the replay buffer.
 
@@ -39,7 +45,7 @@ class ReplayBufferDQN:
             rewards (torch.Tensor): Tensor of shape (batch_size,), dtype torch.float32.
             next_states (torch.Tensor): Tensor of shape (batch_size, n_channels, height, width), dtype torch.float32.
             dones (torch.Tensor): Tensor of shape (batch_size,), dtype torch.bool.
-        
+
         Notes:
             1. Use `random.sample` for uniform sampling without replacement.
             2. Convert NumPy arrays to torch tensors with the correct dtype before moving to `device`.
@@ -53,14 +59,19 @@ class ReplayBufferDQN:
         # 2. collect experiences using the sampled indices
         # 3. stack and move batches to the specified device, making sure to convert to the correct dtype
         # ====================================
-        raise NotImplementedError("sample in replay buffer not implemented")
-    
+        samples = random.sample(self.buffer, k=batch_size)
+        states, actions, rewards, next_states, dones = zip(
+            *samples
+        )  # transpose samples
+        states = torch.tensor(states, dtype=torch.float32, device=device)
+        actions = torch.tensor(actions, dtype=torch.int64, device=device)
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=device)
+        next_states = torch.tensor(next_states, dtype=torch.float32, device=device)
+        dones = torch.tensor(dones, dtype=torch.bool, device=device)
 
-    
         # ========== YOUR CODE ENDS ==========
 
         return states, actions, rewards, next_states, dones
-
 
     def __len__(self):
         return len(self.buffer)

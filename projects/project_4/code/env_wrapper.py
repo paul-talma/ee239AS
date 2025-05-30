@@ -1,4 +1,5 @@
 import numpy as np
+import utils
 import gymnasium as gym
 
 
@@ -50,21 +51,15 @@ class EnvWrapper(gym.Wrapper):
         # 3. crop and resize the final frame
         # 4. stack the frames to form the initial state
         # ====================================
-        obs, info = self.env.reset()
-        last_frames = []
-        for _ in range(self.initial_no_op - 4):
+        obs, info = self.env.reset(**kwargs)
+        for _ in range(self.initial_no_op):
             obs, reward, terminated, truncated, info = self.env.step(
                 self.do_nothing_action
             )
 
-        for _ in range(4):
-            obs, reward, terminated, truncated, info = self.env.step(
-                self.do_nothing_action
-            )
-            obs = obs[:, :-4]
-            last_frames.append(obs)
+        obs = utils.preprocess(obs)
 
-        self.stacked_state = np.array(last_frames)
+        self.stacked_state = np.array([obs] * 4)
         # ========== YOUR CODE ENDS ==========
 
         return self.stacked_state, info
@@ -95,4 +90,3 @@ class EnvWrapper(gym.Wrapper):
 
         # ========== YOUR CODE ENDS ==========
         return self.stacked_state, reward, terminated, truncated, info
-

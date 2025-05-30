@@ -1,14 +1,15 @@
-import torch as torch 
+import torch as torch
 import torch.nn as nn
-
-
-import torch 
-import torch.nn as nn
-import numpy as np
 
 
 class MLP(nn.Module):
-    def __init__(self, input_size:int, action_size:int, hidden_size:int=256,non_linear:nn.Module=nn.ReLU):
+    def __init__(
+        self,
+        input_size: int,
+        action_size: int,
+        hidden_size: int = 256,
+        non_linear: nn.Module = nn.ReLU,
+    ):
         """
         input: tuple[int]
             The input size of the image, of shape (channels, height, width)
@@ -21,25 +22,21 @@ class MLP(nn.Module):
         """
         super(MLP, self).__init__()
         # ========== YOUR CODE HERE ==========
-        # TODO:
-        # self.linear1 = 
-        # self.output = 
-        # self.non_linear = 
-        # ====================================
-        raise NotImplementedError("MLP not implemented")
-    
-
+        self.linear1 = nn.Linear(input_size, hidden_size)
+        self.output = nn.Linear(hidden_size, action_size)
+        self.non_linear = non_linear
 
         # ========== YOUR CODE ENDS ==========
 
-    def forward(self, x:torch.Tensor)->torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # ========== YOUR CODE HERE ==========
-        raise NotImplementedError("MLP forward not implemented")
-    
-
+        x = self.linear1(x)
+        x = self.non_linear(x)
+        x = self.output(x)
 
         # ========== YOUR CODE ENDS ==========
         return x
+
 
 class Nature_Paper_Conv(nn.Module):
     """
@@ -47,10 +44,11 @@ class Nature_Paper_Conv(nn.Module):
     - 1 convolutional layer with 32 8x8 kernels with a stride of 4x4 w/ ReLU activation
     - 1 convolutional layer with 64 4x4 kernels with a stride of 2x2 w/ ReLU activation
     - 1 convolutional layer with 64 3x3 kernels with a stride of 1x1 w/ ReLU activation
-    - 1 fully connected layer with 512 neurons and ReLU activation. 
+    - 1 fully connected layer with 512 neurons and ReLU activation.
     Based on 2015 paper 'Human-level control through deep reinforcement learning' by Mnih et al
     """
-    def __init__(self, input_size:tuple[int], action_size:int,**kwargs):
+
+    def __init__(self, input_size: tuple[int], action_size: int, **kwargs):
         """
         input: tuple[int]
             The input size of the image, of shape (channels, height, width)
@@ -61,17 +59,63 @@ class Nature_Paper_Conv(nn.Module):
         """
         super(Nature_Paper_Conv, self).__init__()
         # ========== YOUR CODE HERE ==========
-        raise NotImplementedError("Nature_Paper_Conv not implemented")
-    
+        self.n_channels = input_size[0]
+        self.height = input_size[1]
+        self.width = input_size[2]
+        self.conv1 = nn.Conv2d(
+            in_channels=self.n_channels,
+            out_channels=32,
+            kernel_size=8,
+            stride=4,
+        )  # output: (32, 20, 20)
+        self.conv2 = nn.Conv2d(
+            in_channels=32,
+            out_channels=64,
+            kernel_size=4,
+            stride=2,
+        )  # output: (64, 9, 9)
+        self.conv3 = nn.Conv2d(
+            in_channels=64,
+            out_channels=64,
+            kernel_size=3,
+            stride=1,
+        )  # output: (64, 7, 7)
+        self.fc1 = nn.Linear(in_features=3136, out_features=512)
+        self.fc2 = nn.Linear(in_features=512, out_features=action_size)
+        self.relu = nn.ReLU()
+        self.flatten = nn.Flatten()
 
+        # for tests
+        self.CNN = nn.Sequential(
+            self.conv1,
+            self.relu,
+            self.conv2,
+            self.relu,
+            self.conv3,
+            self.relu,
+        )
+
+        # for tests
+        self.MLP = nn.Sequential(
+            self.fc1,
+            self.relu,
+            self.fc2,
+        )
 
         # ========== YOUR CODE ENDS ==========
 
-    def forward(self, x:torch.Tensor)->torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # ========== YOUR CODE HERE ==========
-        raise NotImplementedError("Nature_Paper_Conv forward not implemented")
-    
+        x = self.conv1(x)
+        x = self.relu(x)
+        x = self.conv2(x)
+        x = self.relu(x)
+        x = self.conv3(x)
+        x = self.relu(x)
+        x = self.flatten(x)
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
 
-    
         # ========== YOUR CODE ENDS ==========
         return x
