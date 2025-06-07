@@ -21,3 +21,5 @@ wandb/
 models/
 test*
 MNIST/
+runs/
+submission/
