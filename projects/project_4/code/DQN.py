@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torch.nn
 import gymnasium as gym
 from replay_buffer import ReplayBufferDQN
+
 import wandb
 import random
 import numpy as np
@@ -11,14 +12,17 @@ import os
 import time
 from utils import exponential_decay
 import typing
+from model import Nature_Paper_Conv
 
-device = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "mps"
-    if torch.mps.is_available()
-    else "cpu"
-)
+torch.set_printoptions(precision=2)
+
+# device = (
+#     "cuda"
+#     if torch.cuda.is_available()
+#     else "mps"
+#     if torch.mps.is_available()
+#     else "cpu"
+# )
 
 # TODO: change the logging here if you don't like wandb
 
@@ -28,7 +32,7 @@ class DQN:
         self,
         env: typing.Union[gym.Env, gym.Wrapper],
         # model params
-        model: torch.nn.Module,
+        model: Nature_Paper_Conv,
         model_kwargs: dict = {},
         # overall hyperparams
         lr: float = 0.001,
@@ -36,7 +40,7 @@ class DQN:
         buffer_size: int = 10000,
         batch_size: int = 32,
         loss_fn: str = "mse_loss",
-        use_wandb: bool = False,
+        use_wandb: bool = True,
         device: str = "cpu",
         seed: int = 42,
         epsilon_scheduler=exponential_decay(1, 700, 0.1),
@@ -194,11 +198,19 @@ class DQN:
             return False, 0
 
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(
-            self.batch_size, device
+            self.batch_size, self.device
         )
+
+        # current q vals
         q_values = self.model(states)
-        next_q_values = torch.max(self.model(next_states), dim=1, keepdims=True)[0]
-        target_values = rewards + self.gamma * next_q_values * (1 - dones)
+        q_values = q_values.gather(dim=1, index=actions.unsqueeze(1)).squeeze()
+
+        # next q vals
+        with torch.no_grad():
+            next_q_values = self.model(next_states)
+        next_q_values = torch.max(next_q_values, dim=1, keepdims=True)[0].squeeze()
+
+        target_values = rewards + self.gamma * next_q_values * (~dones)
         loss = self.loss_fn(input=q_values, target=target_values)
         self.optimizer.zero_grad()
         loss.backward()
@@ -228,6 +240,9 @@ class DQN:
         if random.random() < epsilon:
             index = np.random.randint(self.action_space)
         else:
+            state = torch.tensor(
+                state, device=self.device, dtype=torch.float32
+            ).unsqueeze(0)
             q_values = self.model(state)
             index = torch.argmax(q_values).item()
 
@@ -326,7 +341,11 @@ class HardUpdateDQN(DQN):
         # TODO:
         # fill in the initialization and synchronization of the target model weights
         # ====================================
-        raise NotImplementedError("HardUpdateDQN class not implemented")
+        self.target_model = model(
+            self.observation_space, self.env.action_space.n, **model_kwargs
+        ).to(self.device)
+        self.update_freq = update_freq
+        wandb.config.update({"update_freq": update_freq}, allow_val_change=True)
 
         # ========== YOUR CODE ENDS ==========
 
@@ -342,9 +361,33 @@ class HardUpdateDQN(DQN):
         # hint: you can copy over most of the code from the parent class
         # and only change one line
         # ====================================
-        raise NotImplementedError(
-            "optimize_model func in HardUpdateDQN class not implemented"
+        if len(self.replay_buffer) < 10 * self.batch_size:
+            return False, 0
+
+        states, actions, rewards, next_states, dones = self.replay_buffer.sample(
+            self.batch_size, self.device
         )
+
+        # current q vals
+        q_values = self.model(states)
+        q_values = q_values.gather(dim=1, index=actions.unsqueeze(1)).squeeze()
+
+        # next q vals
+        self.target_model.eval()
+        with torch.no_grad():
+            next_q_values = self.target_model(next_states)
+        next_q_values = torch.max(next_q_values, dim=1, keepdims=True)[0].squeeze()
+        self.target_model.train()
+
+        target_values = rewards + self.gamma * next_q_values * (~dones)
+        loss = self.loss_fn(input=q_values, target=target_values)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        self._update_model()
+
+        return True, loss.item()
 
         # ========== YOUR CODE ENDS ==========
 
@@ -378,6 +421,8 @@ class SoftUpdateDQN(HardUpdateDQN):
         super().__init__(env, model, model_kwargs, *args, **kwargs)
         self.tau = tau
 
+        wandb.config.update({"tau": tau}, allow_val_change=True)
+
     def _update_model(self):
         """
         Soft updates the target model
@@ -385,8 +430,11 @@ class SoftUpdateDQN(HardUpdateDQN):
         # ========== YOUR CODE HERE ==========
         # TODO
         # ====================================
-        raise NotImplementedError(
-            "update_model func in SoftUpdateDQN class not implemented"
-        )
+        for param, target_param in zip(
+            self.model.parameters(), self.target_model.parameters()
+        ):
+            target_param.data.copy_(
+                self.tau * param.data + (1 - self.tau) * target_param.data
+            )
 
         # ========== YOUR CODE ENDS ==========

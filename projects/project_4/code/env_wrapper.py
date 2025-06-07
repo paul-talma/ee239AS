@@ -59,7 +59,7 @@ class EnvWrapper(gym.Wrapper):
 
         obs = utils.preprocess(obs)
 
-        self.stacked_state = np.array([obs] * 4)
+        self.stacked_state = np.array([obs] * self.stack_frames)
         # ========== YOUR CODE ENDS ==========
 
         return self.stacked_state, info
@@ -86,7 +86,17 @@ class EnvWrapper(gym.Wrapper):
         # 3. preprocess the final observed frame.
         # 4. append new frame to `self.stacked_state` and remove oldest.
         # ====================================
-        raise NotImplementedError("step in env_wrapper not implemented")
+        reward = 0
+
+        for _ in range(self.skip_frames):
+            obs, r, terminated, truncated, info = self.env.step(action)
+            reward += r
+            if terminated or truncated:
+                break
+
+        obs = utils.preprocess(obs)
+        self.stacked_state = np.roll(self.stacked_state, shift=-1, axis=0)
+        self.stacked_state[-1] = obs
 
         # ========== YOUR CODE ENDS ==========
         return self.stacked_state, reward, terminated, truncated, info

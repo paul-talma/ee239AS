@@ -24,7 +24,7 @@ class MLP(nn.Module):
         # ========== YOUR CODE HERE ==========
         self.linear1 = nn.Linear(input_size, hidden_size)
         self.output = nn.Linear(hidden_size, action_size)
-        self.non_linear = non_linear
+        self.non_linear = non_linear()
 
         # ========== YOUR CODE ENDS ==========
 
@@ -62,60 +62,39 @@ class Nature_Paper_Conv(nn.Module):
         self.n_channels = input_size[0]
         self.height = input_size[1]
         self.width = input_size[2]
-        self.conv1 = nn.Conv2d(
-            in_channels=self.n_channels,
-            out_channels=32,
-            kernel_size=8,
-            stride=4,
-        )  # output: (32, 20, 20)
-        self.conv2 = nn.Conv2d(
-            in_channels=32,
-            out_channels=64,
-            kernel_size=4,
-            stride=2,
-        )  # output: (64, 9, 9)
-        self.conv3 = nn.Conv2d(
-            in_channels=64,
-            out_channels=64,
-            kernel_size=3,
-            stride=1,
-        )  # output: (64, 7, 7)
-        self.fc1 = nn.Linear(in_features=3136, out_features=512)
-        self.fc2 = nn.Linear(in_features=512, out_features=action_size)
-        self.relu = nn.ReLU()
-        self.flatten = nn.Flatten()
 
-        # for tests
         self.CNN = nn.Sequential(
-            self.conv1,
-            self.relu,
-            self.conv2,
-            self.relu,
-            self.conv3,
-            self.relu,
+            nn.Conv2d(
+                in_channels=self.n_channels,
+                out_channels=32,
+                kernel_size=8,
+                stride=4,
+            ),
+            nn.ReLU(),
+            nn.Conv2d(
+                in_channels=32,
+                out_channels=64,
+                kernel_size=4,
+                stride=2,
+            ),
+            nn.ReLU(),
+            nn.Conv2d(
+                in_channels=64,
+                out_channels=64,
+                kernel_size=3,
+                stride=1,
+            ),
+            nn.ReLU(),
+            nn.Flatten(),
         )
 
-        # for tests
-        self.MLP = nn.Sequential(
-            self.fc1,
-            self.relu,
-            self.fc2,
-        )
+        self.MLP = MLP(input_size=3136, hidden_size=512, action_size=action_size)
 
         # ========== YOUR CODE ENDS ==========
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # ========== YOUR CODE HERE ==========
-        x = self.conv1(x)
-        x = self.relu(x)
-        x = self.conv2(x)
-        x = self.relu(x)
-        x = self.conv3(x)
-        x = self.relu(x)
-        x = self.flatten(x)
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.fc2(x)
-
+        x = self.CNN(x)
+        x = self.MLP(x)
         # ========== YOUR CODE ENDS ==========
         return x

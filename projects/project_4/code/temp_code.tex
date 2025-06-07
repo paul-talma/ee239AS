@@ -1,0 +1,454 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{fancyvrb}
+\usepackage{color}
+\usepackage{fvextra}
+\usepackage[margin=0.5in]{geometry}
+\begin{document}
+
+\section*{DQN.py}
+\begin{Verbatim}[commandchars=\\\{\}]
+\PY{k+kn}{import} \PY{n+nn}{torch}
+\PY{k+kn}{import} \PY{n+nn}{torch}\PY{n+nn}{.}\PY{n+nn}{optim} \PY{k}{as} \PY{n+nn}{optim}
+\PY{k+kn}{import} \PY{n+nn}{torch}\PY{n+nn}{.}\PY{n+nn}{nn}\PY{n+nn}{.}\PY{n+nn}{functional} \PY{k}{as} \PY{n+nn}{F}
+\PY{k+kn}{import} \PY{n+nn}{torch}\PY{n+nn}{.}\PY{n+nn}{nn}
+\PY{k+kn}{import} \PY{n+nn}{gymnasium} \PY{k}{as} \PY{n+nn}{gym}
+\PY{k+kn}{from} \PY{n+nn}{replay\PYZus{}buffer} \PY{k+kn}{import} \PY{n}{ReplayBufferDQN}
+
+\PY{k+kn}{import} \PY{n+nn}{wandb}
+\PY{k+kn}{import} \PY{n+nn}{random}
+\PY{k+kn}{import} \PY{n+nn}{numpy} \PY{k}{as} \PY{n+nn}{np}
+\PY{k+kn}{import} \PY{n+nn}{os}
+\PY{k+kn}{import} \PY{n+nn}{time}
+\PY{k+kn}{from} \PY{n+nn}{utils} \PY{k+kn}{import} \PY{n}{exponential\PYZus{}decay}
+\PY{k+kn}{import} \PY{n+nn}{typing}
+\PY{k+kn}{from} \PY{n+nn}{model} \PY{k+kn}{import} \PY{n}{Nature\PYZus{}Paper\PYZus{}Conv}
+
+\PY{n}{torch}\PY{o}{.}\PY{n}{set\PYZus{}printoptions}\PY{p}{(}\PY{n}{precision}\PY{o}{=}\PY{l+m+mi}{2}\PY{p}{)}
+
+\PY{c+c1}{\PYZsh{} device = (}
+\PY{c+c1}{\PYZsh{}     \PYZdq{}cuda\PYZdq{}}
+\PY{c+c1}{\PYZsh{}     if torch.cuda.is\PYZus{}available()}
+\PY{c+c1}{\PYZsh{}     else \PYZdq{}mps\PYZdq{}}
+\PY{c+c1}{\PYZsh{}     if torch.mps.is\PYZus{}available()}
+\PY{c+c1}{\PYZsh{}     else \PYZdq{}cpu\PYZdq{}}
+\PY{c+c1}{\PYZsh{} )}
+
+\PY{c+c1}{\PYZsh{} TODO: change the logging here if you don\PYZsq{}t like wandb}
+
+
+\PY{k}{class} \PY{n+nc}{DQN}\PY{p}{:}
+    \PY{k}{def} \PY{n+nf+fm}{\PYZus{}\PYZus{}init\PYZus{}\PYZus{}}\PY{p}{(}
+        \PY{n+nb+bp}{self}\PY{p}{,}
+        \PY{n}{env}\PY{p}{:} \PY{n}{typing}\PY{o}{.}\PY{n}{Union}\PY{p}{[}\PY{n}{gym}\PY{o}{.}\PY{n}{Env}\PY{p}{,} \PY{n}{gym}\PY{o}{.}\PY{n}{Wrapper}\PY{p}{]}\PY{p}{,}
+        \PY{c+c1}{\PYZsh{} model params}
+        \PY{n}{model}\PY{p}{:} \PY{n}{Nature\PYZus{}Paper\PYZus{}Conv}\PY{p}{,}
+        \PY{n}{model\PYZus{}kwargs}\PY{p}{:} \PY{n+nb}{dict} \PY{o}{=} \PY{p}{\PYZob{}}\PY{p}{\PYZcb{}}\PY{p}{,}
+        \PY{c+c1}{\PYZsh{} overall hyperparams}
+        \PY{n}{lr}\PY{p}{:} \PY{n+nb}{float} \PY{o}{=} \PY{l+m+mf}{0.001}\PY{p}{,}
+        \PY{n}{gamma}\PY{p}{:} \PY{n+nb}{float} \PY{o}{=} \PY{l+m+mf}{0.99}\PY{p}{,}
+        \PY{n}{buffer\PYZus{}size}\PY{p}{:} \PY{n+nb}{int} \PY{o}{=} \PY{l+m+mi}{10000}\PY{p}{,}
+        \PY{n}{batch\PYZus{}size}\PY{p}{:} \PY{n+nb}{int} \PY{o}{=} \PY{l+m+mi}{32}\PY{p}{,}
+        \PY{n}{loss\PYZus{}fn}\PY{p}{:} \PY{n+nb}{str} \PY{o}{=} \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{mse\PYZus{}loss}\PY{l+s+s2}{\PYZdq{}}\PY{p}{,}
+        \PY{n}{use\PYZus{}wandb}\PY{p}{:} \PY{n+nb}{bool} \PY{o}{=} \PY{k+kc}{True}\PY{p}{,}
+        \PY{n}{device}\PY{p}{:} \PY{n+nb}{str} \PY{o}{=} \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{cpu}\PY{l+s+s2}{\PYZdq{}}\PY{p}{,}
+        \PY{n}{seed}\PY{p}{:} \PY{n+nb}{int} \PY{o}{=} \PY{l+m+mi}{42}\PY{p}{,}
+        \PY{n}{epsilon\PYZus{}scheduler}\PY{o}{=}\PY{n}{exponential\PYZus{}decay}\PY{p}{(}\PY{l+m+mi}{1}\PY{p}{,} \PY{l+m+mi}{700}\PY{p}{,} \PY{l+m+mf}{0.1}\PY{p}{)}\PY{p}{,}
+        \PY{n}{save\PYZus{}path}\PY{p}{:} \PY{n+nb}{str} \PY{o}{=} \PY{k+kc}{None}\PY{p}{,}
+    \PY{p}{)}\PY{p}{:}
+\PY{+w}{        }\PY{l+s+sd}{\PYZdq{}\PYZdq{}\PYZdq{}Initializes the DQN algorithm}
+
+\PY{l+s+sd}{        Args:}
+\PY{l+s+sd}{            env (gym.Env|gym.Wrapper): the environment to train on}
+\PY{l+s+sd}{            model (torch.nn.Module): the model to train}
+\PY{l+s+sd}{            model\PYZus{}kwargs (dict, optional): the keyword arguments to pass to the model. Defaults to \PYZob{}\PYZcb{}.}
+\PY{l+s+sd}{            lr (float, optional): the learning rate to use in the optimizer. Defaults to 0.001.}
+\PY{l+s+sd}{            gamma (float, optional): discount factor. Defaults to 0.99.}
+\PY{l+s+sd}{            buffer\PYZus{}size (int, optional): the size of the replay buffer. Defaults to 10000.}
+\PY{l+s+sd}{            batch\PYZus{}size (int, optional): the batch size. Defaults to 32.}
+\PY{l+s+sd}{            loss\PYZus{}fn (str, optional): the name of the loss function to use. Defualts to \PYZsq{}mse\PYZus{}loss\PYZsq{}.}
+\PY{l+s+sd}{            use\PYZus{}wandb (bool, optional): \PYZus{}description\PYZus{}. Defaults to False.}
+\PY{l+s+sd}{            device (str, optional): \PYZus{}description\PYZus{}. Defaults to \PYZsq{}cpu\PYZsq{}.}
+\PY{l+s+sd}{            seed (int, optional): the seed to use for reproducibility. Defaults to 42.}
+\PY{l+s+sd}{            epsilon\PYZus{}scheduler ([type], optional): the epsilon scheduler to use, must have a \PYZus{}\PYZus{}call\PYZus{}\PYZus{} method that returns a float between 0 and 1}
+\PY{l+s+sd}{            save\PYZus{}path (str, optional): \PYZus{}description\PYZus{}. Defaults to None.}
+
+\PY{l+s+sd}{        Raises:}
+\PY{l+s+sd}{            ValueError: \PYZus{}description\PYZus{}}
+\PY{l+s+sd}{        \PYZdq{}\PYZdq{}\PYZdq{}}
+
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env} \PY{o}{=} \PY{n}{env}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{\PYZus{}set\PYZus{}seed}\PY{p}{(}\PY{n}{seed}\PY{p}{)}
+
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{observation\PYZus{}space} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env}\PY{o}{.}\PY{n}{observation\PYZus{}space}\PY{o}{.}\PY{n}{shape}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{action\PYZus{}space} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env}\PY{o}{.}\PY{n}{action\PYZus{}space}\PY{o}{.}\PY{n}{n}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model} \PY{o}{=} \PY{n}{model}\PY{p}{(}
+            \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{observation\PYZus{}space}\PY{p}{,} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env}\PY{o}{.}\PY{n}{action\PYZus{}space}\PY{o}{.}\PY{n}{n}\PY{p}{,} \PY{o}{*}\PY{o}{*}\PY{n}{model\PYZus{}kwargs}
+        \PY{p}{)}\PY{o}{.}\PY{n}{to}\PY{p}{(}\PY{n}{device}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model}\PY{o}{.}\PY{n}{train}\PY{p}{(}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{optimizer} \PY{o}{=} \PY{n}{optim}\PY{o}{.}\PY{n}{Adam}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model}\PY{o}{.}\PY{n}{parameters}\PY{p}{(}\PY{p}{)}\PY{p}{,} \PY{n}{lr}\PY{o}{=}\PY{n}{lr}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{gamma} \PY{o}{=} \PY{n}{gamma}
+
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{replay\PYZus{}buffer} \PY{o}{=} \PY{n}{ReplayBufferDQN}\PY{p}{(}\PY{n}{buffer\PYZus{}size}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{batch\PYZus{}size} \PY{o}{=} \PY{n}{batch\PYZus{}size}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{i\PYZus{}update} \PY{o}{=} \PY{l+m+mi}{0}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{device} \PY{o}{=} \PY{n}{device}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{epsilon\PYZus{}decay} \PY{o}{=} \PY{n}{epsilon\PYZus{}scheduler}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{save\PYZus{}path} \PY{o}{=} \PY{n}{save\PYZus{}path} \PY{k}{if} \PY{n}{save\PYZus{}path} \PY{o+ow}{is} \PY{o+ow}{not} \PY{k+kc}{None} \PY{k}{else} \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{./}\PY{l+s+s2}{\PYZdq{}}
+
+        \PY{c+c1}{\PYZsh{} set the loss function}
+        \PY{k}{if} \PY{n}{loss\PYZus{}fn} \PY{o}{==} \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{smooth\PYZus{}l1\PYZus{}loss}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:}
+            \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{loss\PYZus{}fn} \PY{o}{=} \PY{n}{F}\PY{o}{.}\PY{n}{smooth\PYZus{}l1\PYZus{}loss}
+        \PY{k}{elif} \PY{n}{loss\PYZus{}fn} \PY{o}{==} \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{mse\PYZus{}loss}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:}
+            \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{loss\PYZus{}fn} \PY{o}{=} \PY{n}{F}\PY{o}{.}\PY{n}{mse\PYZus{}loss}
+        \PY{k}{else}\PY{p}{:}
+            \PY{k}{raise} \PY{n+ne}{ValueError}\PY{p}{(}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{loss\PYZus{}fn must be either smooth\PYZus{}l1\PYZus{}loss or mse\PYZus{}loss}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}
+
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{wandb} \PY{o}{=} \PY{n}{use\PYZus{}wandb}
+        \PY{k}{if} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{wandb}\PY{p}{:}
+            \PY{n}{wandb}\PY{o}{.}\PY{n}{init}\PY{p}{(}\PY{n}{project}\PY{o}{=}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{racing\PYZhy{}car\PYZhy{}dqn}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}
+            \PY{c+c1}{\PYZsh{} log the hyperparameters}
+            \PY{n}{wandb}\PY{o}{.}\PY{n}{config}\PY{o}{.}\PY{n}{update}\PY{p}{(}
+                \PY{p}{\PYZob{}}
+                    \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{lr}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{lr}\PY{p}{,}
+                    \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{gamma}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{gamma}\PY{p}{,}
+                    \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{buffer\PYZus{}size}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{buffer\PYZus{}size}\PY{p}{,}
+                    \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{batch\PYZus{}size}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{batch\PYZus{}size}\PY{p}{,}
+                    \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{loss\PYZus{}fn}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{loss\PYZus{}fn}\PY{p}{,}
+                    \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{device}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{device}\PY{p}{,}
+                    \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{seed}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{seed}\PY{p}{,}
+                    \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{save\PYZus{}path}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{save\PYZus{}path}\PY{p}{,}
+                \PY{p}{\PYZcb{}}
+            \PY{p}{)}
+
+    \PY{k}{def} \PY{n+nf}{train}\PY{p}{(}
+        \PY{n+nb+bp}{self}\PY{p}{,}
+        \PY{n}{n\PYZus{}episodes}\PY{p}{:} \PY{n+nb}{int} \PY{o}{=} \PY{l+m+mi}{1000}\PY{p}{,}
+        \PY{n}{validate\PYZus{}every}\PY{p}{:} \PY{n+nb}{int} \PY{o}{=} \PY{l+m+mi}{100}\PY{p}{,}
+        \PY{n}{n\PYZus{}validation\PYZus{}episodes}\PY{p}{:} \PY{n+nb}{int} \PY{o}{=} \PY{l+m+mi}{10}\PY{p}{,}
+        \PY{n}{n\PYZus{}test\PYZus{}episodes}\PY{p}{:} \PY{n+nb}{int} \PY{o}{=} \PY{l+m+mi}{10}\PY{p}{,}
+        \PY{n}{save\PYZus{}every}\PY{p}{:} \PY{n+nb}{int} \PY{o}{=} \PY{l+m+mi}{100}\PY{p}{,}
+    \PY{p}{)}\PY{p}{:}
+        \PY{n}{os}\PY{o}{.}\PY{n}{makedirs}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{save\PYZus{}path}\PY{p}{,} \PY{n}{exist\PYZus{}ok}\PY{o}{=}\PY{k+kc}{True}\PY{p}{)}
+        \PY{n}{best\PYZus{}val\PYZus{}reward} \PY{o}{=} \PY{o}{\PYZhy{}}\PY{n}{np}\PY{o}{.}\PY{n}{inf}
+
+        \PY{k}{for} \PY{n}{episode} \PY{o+ow}{in} \PY{n+nb}{range}\PY{p}{(}\PY{n}{n\PYZus{}episodes}\PY{p}{)}\PY{p}{:}
+            \PY{n}{state}\PY{p}{,} \PY{n}{\PYZus{}} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env}\PY{o}{.}\PY{n}{reset}\PY{p}{(}\PY{p}{)}
+            \PY{n}{done} \PY{o}{=} \PY{k+kc}{False}
+            \PY{n}{truncated} \PY{o}{=} \PY{k+kc}{False}
+            \PY{n}{total\PYZus{}reward} \PY{o}{=} \PY{l+m+mi}{0}
+            \PY{n}{i} \PY{o}{=} \PY{l+m+mi}{0}
+            \PY{n}{loss} \PY{o}{=} \PY{l+m+mi}{0}
+            \PY{n}{start\PYZus{}time} \PY{o}{=} \PY{n}{time}\PY{o}{.}\PY{n}{time}\PY{p}{(}\PY{p}{)}
+            \PY{n}{epsilon} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{epsilon\PYZus{}decay}\PY{p}{(}\PY{p}{)}
+            \PY{k}{while} \PY{p}{(}\PY{o+ow}{not} \PY{n}{done}\PY{p}{)} \PY{o+ow}{and} \PY{p}{(}\PY{o+ow}{not} \PY{n}{truncated}\PY{p}{)}\PY{p}{:}
+                \PY{n}{action} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{\PYZus{}sample\PYZus{}action}\PY{p}{(}\PY{n}{state}\PY{p}{,} \PY{n}{epsilon}\PY{p}{)}
+                \PY{n}{next\PYZus{}state}\PY{p}{,} \PY{n}{reward}\PY{p}{,} \PY{n}{done}\PY{p}{,} \PY{n}{truncated}\PY{p}{,} \PY{n}{\PYZus{}} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env}\PY{o}{.}\PY{n}{step}\PY{p}{(}\PY{n}{action}\PY{p}{)}
+                \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{replay\PYZus{}buffer}\PY{o}{.}\PY{n}{add}\PY{p}{(}\PY{n}{state}\PY{p}{,} \PY{n}{action}\PY{p}{,} \PY{n}{reward}\PY{p}{,} \PY{n}{next\PYZus{}state}\PY{p}{,} \PY{n}{done}\PY{p}{)}
+                \PY{n}{total\PYZus{}reward} \PY{o}{+}\PY{o}{=} \PY{n}{reward}
+                \PY{n}{state} \PY{o}{=} \PY{n}{next\PYZus{}state}
+
+                \PY{n}{not\PYZus{}warm\PYZus{}starting}\PY{p}{,} \PY{n}{l} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{\PYZus{}optimize\PYZus{}model}\PY{p}{(}\PY{p}{)}
+                \PY{k}{if} \PY{n}{not\PYZus{}warm\PYZus{}starting}\PY{p}{:}
+                    \PY{n}{loss} \PY{o}{+}\PY{o}{=} \PY{n}{l}
+                    \PY{n}{epsilon} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{epsilon\PYZus{}decay}\PY{p}{(}\PY{p}{)}
+                    \PY{n}{i} \PY{o}{+}\PY{o}{=} \PY{l+m+mi}{1}
+            \PY{k}{if} \PY{n}{i} \PY{o}{==} \PY{l+m+mi}{0}\PY{p}{:}
+                \PY{n}{avg\PYZus{}loss} \PY{o}{=} \PY{n}{loss} \PY{o}{/} \PY{p}{(}\PY{n}{i} \PY{o}{+} \PY{l+m+mi}{1}\PY{p}{)}
+            \PY{k}{else}\PY{p}{:}
+                \PY{n}{avg\PYZus{}loss} \PY{o}{=} \PY{n}{loss} \PY{o}{/} \PY{n}{i}
+            \PY{k}{if} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{wandb}\PY{p}{:}
+                \PY{n}{wandb}\PY{o}{.}\PY{n}{log}\PY{p}{(}\PY{p}{\PYZob{}}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{total\PYZus{}reward}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{total\PYZus{}reward}\PY{p}{,} \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{loss}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{avg\PYZus{}loss}\PY{p}{\PYZcb{}}\PY{p}{)}
+            \PY{n+nb}{print}\PY{p}{(}
+                \PY{l+s+sa}{f}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{Episode: }\PY{l+s+si}{\PYZob{}}\PY{n}{episode}\PY{l+s+si}{\PYZcb{}}\PY{l+s+s2}{: Time: }\PY{l+s+si}{\PYZob{}}\PY{n}{time}\PY{o}{.}\PY{n}{time}\PY{p}{(}\PY{p}{)}\PY{+w}{ }\PY{o}{\PYZhy{}}\PY{+w}{ }\PY{n}{start\PYZus{}time}\PY{l+s+si}{\PYZcb{}}\PY{l+s+s2}{ Total Reward: }\PY{l+s+si}{\PYZob{}}\PY{n}{total\PYZus{}reward}\PY{l+s+si}{\PYZcb{}}\PY{l+s+s2}{ Avg\PYZus{}Loss: }\PY{l+s+si}{\PYZob{}}\PY{n}{avg\PYZus{}loss}\PY{l+s+si}{\PYZcb{}}\PY{l+s+s2}{\PYZdq{}}
+            \PY{p}{)}
+            \PY{k}{if} \PY{n}{episode} \PY{o}{\PYZpc{}} \PY{n}{validate\PYZus{}every} \PY{o}{==} \PY{n}{validate\PYZus{}every} \PY{o}{\PYZhy{}} \PY{l+m+mi}{1}\PY{p}{:}
+                \PY{n}{mean\PYZus{}reward}\PY{p}{,} \PY{n}{std\PYZus{}reward} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{validate}\PY{p}{(}\PY{n}{n\PYZus{}validation\PYZus{}episodes}\PY{p}{)}
+                \PY{k}{if} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{wandb}\PY{p}{:}
+                    \PY{n}{wandb}\PY{o}{.}\PY{n}{log}\PY{p}{(}\PY{p}{\PYZob{}}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{mean\PYZus{}reward}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{mean\PYZus{}reward}\PY{p}{,} \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{std\PYZus{}reward}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{std\PYZus{}reward}\PY{p}{\PYZcb{}}\PY{p}{)}
+                \PY{n+nb}{print}\PY{p}{(}
+                    \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{Validation Mean Reward: }\PY{l+s+si}{\PYZob{}\PYZcb{}}\PY{l+s+s2}{ Validation Std Reward: }\PY{l+s+si}{\PYZob{}\PYZcb{}}\PY{l+s+s2}{\PYZdq{}}\PY{o}{.}\PY{n}{format}\PY{p}{(}
+                        \PY{n}{mean\PYZus{}reward}\PY{p}{,} \PY{n}{std\PYZus{}reward}
+                    \PY{p}{)}
+                \PY{p}{)}
+                \PY{k}{if} \PY{n}{mean\PYZus{}reward} \PY{o}{\PYZgt{}} \PY{n}{best\PYZus{}val\PYZus{}reward}\PY{p}{:}
+                    \PY{n}{best\PYZus{}val\PYZus{}reward} \PY{o}{=} \PY{n}{mean\PYZus{}reward}
+                    \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{\PYZus{}save}\PY{p}{(}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{best}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}
+
+            \PY{k}{if} \PY{n}{episode} \PY{o}{\PYZpc{}} \PY{n}{save\PYZus{}every} \PY{o}{==} \PY{n}{save\PYZus{}every} \PY{o}{\PYZhy{}} \PY{l+m+mi}{1}\PY{p}{:}
+                \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{\PYZus{}save}\PY{p}{(}\PY{n+nb}{str}\PY{p}{(}\PY{n}{episode}\PY{p}{)}\PY{p}{)}
+
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{\PYZus{}save}\PY{p}{(}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{final}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{load\PYZus{}model}\PY{p}{(}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{best}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}
+        \PY{n}{mean\PYZus{}reward}\PY{p}{,} \PY{n}{std\PYZus{}reward} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{validate}\PY{p}{(}\PY{n}{n\PYZus{}test\PYZus{}episodes}\PY{p}{)}
+        \PY{k}{if} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{wandb}\PY{p}{:}
+            \PY{n}{wandb}\PY{o}{.}\PY{n}{log}\PY{p}{(}\PY{p}{\PYZob{}}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{mean\PYZus{}test\PYZus{}reward}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{mean\PYZus{}reward}\PY{p}{,} \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{std\PYZus{}test\PYZus{}reward}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{std\PYZus{}reward}\PY{p}{\PYZcb{}}\PY{p}{)}
+        \PY{n+nb}{print}\PY{p}{(}
+            \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{Test Mean Reward: }\PY{l+s+si}{\PYZob{}\PYZcb{}}\PY{l+s+s2}{ Test Std Reward: }\PY{l+s+si}{\PYZob{}\PYZcb{}}\PY{l+s+s2}{\PYZdq{}}\PY{o}{.}\PY{n}{format}\PY{p}{(}\PY{n}{mean\PYZus{}reward}\PY{p}{,} \PY{n}{std\PYZus{}reward}\PY{p}{)}
+        \PY{p}{)}
+
+    \PY{k}{def} \PY{n+nf}{\PYZus{}optimize\PYZus{}model}\PY{p}{(}\PY{n+nb+bp}{self}\PY{p}{)}\PY{p}{:}
+\PY{+w}{        }\PY{l+s+sd}{\PYZdq{}\PYZdq{}\PYZdq{}}
+\PY{l+s+sd}{        Performs one optimization step on the DQN.}
+
+\PY{l+s+sd}{        Returns:}
+\PY{l+s+sd}{            bool: whether we have enough samples to optimize the model, which we define as having at least 10*batch\PYZus{}size samples}
+\PY{l+s+sd}{            float: the loss, if we do not have enough samples, we return 0}
+\PY{l+s+sd}{        \PYZdq{}\PYZdq{}\PYZdq{}}
+        \PY{c+c1}{\PYZsh{} ========== YOUR CODE HERE ==========}
+        \PY{c+c1}{\PYZsh{} TODO: some hints to get you started:}
+        \PY{c+c1}{\PYZsh{} 1. check if the replay buffer has enough samples}
+        \PY{c+c1}{\PYZsh{} 2. sample a minibatch}
+        \PY{c+c1}{\PYZsh{} 4. compute current Q: q\PYZus{}values = ...}
+        \PY{c+c1}{\PYZsh{} 5. compute target Q}
+        \PY{c+c1}{\PYZsh{} 6. compute loss between current Q and target Q}
+        \PY{c+c1}{\PYZsh{} 7. backprop}
+        \PY{c+c1}{\PYZsh{} ====================================}
+        \PY{k}{if} \PY{n+nb}{len}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{replay\PYZus{}buffer}\PY{p}{)} \PY{o}{\PYZlt{}} \PY{l+m+mi}{10} \PY{o}{*} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{batch\PYZus{}size}\PY{p}{:}
+            \PY{k}{return} \PY{k+kc}{False}\PY{p}{,} \PY{l+m+mi}{0}
+
+        \PY{n}{states}\PY{p}{,} \PY{n}{actions}\PY{p}{,} \PY{n}{rewards}\PY{p}{,} \PY{n}{next\PYZus{}states}\PY{p}{,} \PY{n}{dones} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{replay\PYZus{}buffer}\PY{o}{.}\PY{n}{sample}\PY{p}{(}
+            \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{batch\PYZus{}size}\PY{p}{,} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{device}
+        \PY{p}{)}
+
+        \PY{c+c1}{\PYZsh{} current q vals}
+        \PY{n}{q\PYZus{}values} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model}\PY{p}{(}\PY{n}{states}\PY{p}{)}
+        \PY{n}{q\PYZus{}values} \PY{o}{=} \PY{n}{q\PYZus{}values}\PY{o}{.}\PY{n}{gather}\PY{p}{(}\PY{n}{dim}\PY{o}{=}\PY{l+m+mi}{1}\PY{p}{,} \PY{n}{index}\PY{o}{=}\PY{n}{actions}\PY{o}{.}\PY{n}{unsqueeze}\PY{p}{(}\PY{l+m+mi}{1}\PY{p}{)}\PY{p}{)}\PY{o}{.}\PY{n}{squeeze}\PY{p}{(}\PY{p}{)}
+
+        \PY{c+c1}{\PYZsh{} next q vals}
+        \PY{k}{with} \PY{n}{torch}\PY{o}{.}\PY{n}{no\PYZus{}grad}\PY{p}{(}\PY{p}{)}\PY{p}{:}
+            \PY{n}{next\PYZus{}q\PYZus{}values} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model}\PY{p}{(}\PY{n}{next\PYZus{}states}\PY{p}{)}
+        \PY{n}{next\PYZus{}q\PYZus{}values} \PY{o}{=} \PY{n}{torch}\PY{o}{.}\PY{n}{max}\PY{p}{(}\PY{n}{next\PYZus{}q\PYZus{}values}\PY{p}{,} \PY{n}{dim}\PY{o}{=}\PY{l+m+mi}{1}\PY{p}{,} \PY{n}{keepdims}\PY{o}{=}\PY{k+kc}{True}\PY{p}{)}\PY{p}{[}\PY{l+m+mi}{0}\PY{p}{]}\PY{o}{.}\PY{n}{squeeze}\PY{p}{(}\PY{p}{)}
+
+        \PY{n}{target\PYZus{}values} \PY{o}{=} \PY{n}{rewards} \PY{o}{+} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{gamma} \PY{o}{*} \PY{n}{next\PYZus{}q\PYZus{}values} \PY{o}{*} \PY{p}{(}\PY{o}{\PYZti{}}\PY{n}{dones}\PY{p}{)}
+        \PY{n}{loss} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{loss\PYZus{}fn}\PY{p}{(}\PY{n+nb}{input}\PY{o}{=}\PY{n}{q\PYZus{}values}\PY{p}{,} \PY{n}{target}\PY{o}{=}\PY{n}{target\PYZus{}values}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{optimizer}\PY{o}{.}\PY{n}{zero\PYZus{}grad}\PY{p}{(}\PY{p}{)}
+        \PY{n}{loss}\PY{o}{.}\PY{n}{backward}\PY{p}{(}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{optimizer}\PY{o}{.}\PY{n}{step}\PY{p}{(}\PY{p}{)}
+
+        \PY{k}{return} \PY{k+kc}{True}\PY{p}{,} \PY{n}{loss}\PY{o}{.}\PY{n}{item}\PY{p}{(}\PY{p}{)}
+
+        \PY{c+c1}{\PYZsh{} ========== YOUR CODE ENDS ==========}
+
+    \PY{k}{def} \PY{n+nf}{\PYZus{}sample\PYZus{}action}\PY{p}{(}\PY{n+nb+bp}{self}\PY{p}{,} \PY{n}{state}\PY{p}{:} \PY{n}{np}\PY{o}{.}\PY{n}{ndarray}\PY{p}{,} \PY{n}{epsilon}\PY{p}{:} \PY{n+nb}{float} \PY{o}{=} \PY{l+m+mf}{0.1}\PY{p}{)} \PY{o}{\PYZhy{}}\PY{o}{\PYZgt{}} \PY{n+nb}{int}\PY{p}{:}
+\PY{+w}{        }\PY{l+s+sd}{\PYZdq{}\PYZdq{}\PYZdq{}}
+\PY{l+s+sd}{        Samples an action from the model}
+
+\PY{l+s+sd}{        Args:}
+\PY{l+s+sd}{            state (np.ndarray): the state, of shape [n\PYZus{}c,h,w]}
+\PY{l+s+sd}{            epsilon (float, optional): the epsilon for epsilon greedy. Defaults to 0.1.}
+
+\PY{l+s+sd}{        Returns:}
+\PY{l+s+sd}{            int: the index of the action to take}
+\PY{l+s+sd}{        \PYZdq{}\PYZdq{}\PYZdq{}}
+        \PY{c+c1}{\PYZsh{} ========== YOUR CODE HERE ==========}
+        \PY{c+c1}{\PYZsh{} TODO:}
+        \PY{c+c1}{\PYZsh{} Epsilon\PYZhy{}greedy action selection:}
+        \PY{c+c1}{\PYZsh{}  \PYZhy{} if probability epsilon: random action}
+        \PY{c+c1}{\PYZsh{}  \PYZhy{} else: greedy action}
+        \PY{c+c1}{\PYZsh{} ====================================}
+        \PY{k}{if} \PY{n}{random}\PY{o}{.}\PY{n}{random}\PY{p}{(}\PY{p}{)} \PY{o}{\PYZlt{}} \PY{n}{epsilon}\PY{p}{:}
+            \PY{n}{index} \PY{o}{=} \PY{n}{np}\PY{o}{.}\PY{n}{random}\PY{o}{.}\PY{n}{randint}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{action\PYZus{}space}\PY{p}{)}
+        \PY{k}{else}\PY{p}{:}
+            \PY{n}{state} \PY{o}{=} \PY{n}{torch}\PY{o}{.}\PY{n}{tensor}\PY{p}{(}
+                \PY{n}{state}\PY{p}{,} \PY{n}{device}\PY{o}{=}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{device}\PY{p}{,} \PY{n}{dtype}\PY{o}{=}\PY{n}{torch}\PY{o}{.}\PY{n}{float32}
+            \PY{p}{)}\PY{o}{.}\PY{n}{unsqueeze}\PY{p}{(}\PY{l+m+mi}{0}\PY{p}{)}
+            \PY{n}{q\PYZus{}values} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model}\PY{p}{(}\PY{n}{state}\PY{p}{)}
+            \PY{n}{index} \PY{o}{=} \PY{n}{torch}\PY{o}{.}\PY{n}{argmax}\PY{p}{(}\PY{n}{q\PYZus{}values}\PY{p}{)}\PY{o}{.}\PY{n}{item}\PY{p}{(}\PY{p}{)}
+
+        \PY{c+c1}{\PYZsh{} ========== YOUR CODE ENDS ==========}
+        \PY{k}{return} \PY{n}{index}
+
+    \PY{k}{def} \PY{n+nf}{\PYZus{}set\PYZus{}seed}\PY{p}{(}\PY{n+nb+bp}{self}\PY{p}{,} \PY{n}{seed}\PY{p}{:} \PY{n+nb}{int}\PY{p}{)}\PY{p}{:}
+        \PY{n}{random}\PY{o}{.}\PY{n}{seed}\PY{p}{(}\PY{n}{seed}\PY{p}{)}
+        \PY{n}{np}\PY{o}{.}\PY{n}{random}\PY{o}{.}\PY{n}{seed}\PY{p}{(}\PY{n}{seed}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{seed} \PY{o}{=} \PY{n}{seed}
+        \PY{n}{torch}\PY{o}{.}\PY{n}{manual\PYZus{}seed}\PY{p}{(}\PY{n}{seed}\PY{p}{)}
+        \PY{n}{torch}\PY{o}{.}\PY{n}{cuda}\PY{o}{.}\PY{n}{manual\PYZus{}seed}\PY{p}{(}\PY{n}{seed}\PY{p}{)}
+        \PY{n}{torch}\PY{o}{.}\PY{n}{backends}\PY{o}{.}\PY{n}{cudnn}\PY{o}{.}\PY{n}{deterministic} \PY{o}{=} \PY{k+kc}{True}
+        \PY{n}{gym}\PY{o}{.}\PY{n}{utils}\PY{o}{.}\PY{n}{seeding}\PY{o}{.}\PY{n}{np\PYZus{}random}\PY{p}{(}\PY{n}{seed}\PY{p}{)}
+
+    \PY{k}{def} \PY{n+nf}{\PYZus{}validate\PYZus{}once}\PY{p}{(}\PY{n+nb+bp}{self}\PY{p}{)}\PY{p}{:}
+        \PY{n}{state}\PY{p}{,} \PY{n}{\PYZus{}} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env}\PY{o}{.}\PY{n}{reset}\PY{p}{(}\PY{p}{)}
+        \PY{n}{done} \PY{o}{=} \PY{k+kc}{False}
+        \PY{n}{truncated} \PY{o}{=} \PY{k+kc}{False}
+        \PY{n}{total\PYZus{}reward} \PY{o}{=} \PY{l+m+mi}{0}
+        \PY{n}{i} \PY{o}{=} \PY{l+m+mi}{0}
+        \PY{c+c1}{\PYZsh{} epsilon = self.epsilon\PYZus{}decay()}
+        \PY{k}{while} \PY{p}{(}\PY{o+ow}{not} \PY{n}{done}\PY{p}{)} \PY{o+ow}{and} \PY{p}{(}\PY{o+ow}{not} \PY{n}{truncated}\PY{p}{)}\PY{p}{:}
+            \PY{n}{action} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{\PYZus{}sample\PYZus{}action}\PY{p}{(}\PY{n}{state}\PY{p}{,} \PY{l+m+mi}{0}\PY{p}{)}
+            \PY{c+c1}{\PYZsh{} out = self.env.step(action)}
+            \PY{n}{next\PYZus{}state}\PY{p}{,} \PY{n}{reward}\PY{p}{,} \PY{n}{done}\PY{p}{,} \PY{n}{truncated}\PY{p}{,} \PY{n}{\PYZus{}} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env}\PY{o}{.}\PY{n}{step}\PY{p}{(}\PY{n}{action}\PY{p}{)}
+            \PY{c+c1}{\PYZsh{} next\PYZus{}state = np.array(state\PYZus{}buffer[\PYZhy{}self.n\PYZus{}frames:])}
+            \PY{n}{total\PYZus{}reward} \PY{o}{+}\PY{o}{=} \PY{n}{reward}
+            \PY{n}{state} \PY{o}{=} \PY{n}{next\PYZus{}state}
+        \PY{k}{return} \PY{n}{total\PYZus{}reward}
+
+    \PY{k}{def} \PY{n+nf}{validate}\PY{p}{(}\PY{n+nb+bp}{self}\PY{p}{,} \PY{n}{n\PYZus{}episodes}\PY{p}{:} \PY{n+nb}{int} \PY{o}{=} \PY{l+m+mi}{10}\PY{p}{)}\PY{p}{:}
+        \PY{c+c1}{\PYZsh{} self.model.eval()}
+        \PY{n}{rewards\PYZus{}per\PYZus{}episode} \PY{o}{=} \PY{p}{[}\PY{p}{]}
+        \PY{k}{for} \PY{n}{\PYZus{}} \PY{o+ow}{in} \PY{n+nb}{range}\PY{p}{(}\PY{n}{n\PYZus{}episodes}\PY{p}{)}\PY{p}{:}
+            \PY{n}{rewards\PYZus{}per\PYZus{}episode}\PY{o}{.}\PY{n}{append}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{\PYZus{}validate\PYZus{}once}\PY{p}{(}\PY{p}{)}\PY{p}{)}
+        \PY{c+c1}{\PYZsh{} self.model.train()}
+        \PY{k}{return} \PY{n}{np}\PY{o}{.}\PY{n}{mean}\PY{p}{(}\PY{n}{rewards\PYZus{}per\PYZus{}episode}\PY{p}{)}\PY{p}{,} \PY{n}{np}\PY{o}{.}\PY{n}{std}\PY{p}{(}\PY{n}{rewards\PYZus{}per\PYZus{}episode}\PY{p}{)}
+
+    \PY{k}{def} \PY{n+nf}{load\PYZus{}model}\PY{p}{(}\PY{n+nb+bp}{self}\PY{p}{,} \PY{n}{suffix}\PY{p}{:} \PY{n+nb}{str} \PY{o}{=} \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}\PY{p}{:}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model}\PY{o}{.}\PY{n}{load\PYZus{}state\PYZus{}dict}\PY{p}{(}
+            \PY{n}{torch}\PY{o}{.}\PY{n}{load}\PY{p}{(}\PY{n}{os}\PY{o}{.}\PY{n}{path}\PY{o}{.}\PY{n}{join}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{save\PYZus{}path}\PY{p}{,} \PY{l+s+sa}{f}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{model\PYZus{}}\PY{l+s+si}{\PYZob{}}\PY{n}{suffix}\PY{l+s+si}{\PYZcb{}}\PY{l+s+s2}{.pt}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}\PY{p}{)}
+        \PY{p}{)}
+
+    \PY{k}{def} \PY{n+nf}{\PYZus{}save}\PY{p}{(}\PY{n+nb+bp}{self}\PY{p}{,} \PY{n}{suffix}\PY{p}{:} \PY{n+nb}{str} \PY{o}{=} \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}\PY{p}{:}
+        \PY{n}{torch}\PY{o}{.}\PY{n}{save}\PY{p}{(}
+            \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model}\PY{o}{.}\PY{n}{state\PYZus{}dict}\PY{p}{(}\PY{p}{)}\PY{p}{,} \PY{n}{os}\PY{o}{.}\PY{n}{path}\PY{o}{.}\PY{n}{join}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{save\PYZus{}path}\PY{p}{,} \PY{l+s+sa}{f}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{model\PYZus{}}\PY{l+s+si}{\PYZob{}}\PY{n}{suffix}\PY{l+s+si}{\PYZcb{}}\PY{l+s+s2}{.pt}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}
+        \PY{p}{)}
+
+    \PY{k}{def} \PY{n+nf}{play\PYZus{}episode}\PY{p}{(}
+        \PY{n+nb+bp}{self}\PY{p}{,} \PY{n}{epsilon}\PY{p}{:} \PY{n+nb}{float} \PY{o}{=} \PY{l+m+mi}{0}\PY{p}{,} \PY{n}{return\PYZus{}frames}\PY{p}{:} \PY{n+nb}{bool} \PY{o}{=} \PY{k+kc}{True}\PY{p}{,} \PY{n}{seed}\PY{p}{:} \PY{n+nb}{int} \PY{o}{=} \PY{k+kc}{None}
+    \PY{p}{)}\PY{p}{:}
+\PY{+w}{        }\PY{l+s+sd}{\PYZdq{}\PYZdq{}\PYZdq{}Plays an episode of the environment}
+
+\PY{l+s+sd}{        Args:}
+\PY{l+s+sd}{            epsilon (float, optional): the epsilon for epsilon greedy. Defaults to 0.}
+\PY{l+s+sd}{            return\PYZus{}frames (bool, optional): whether we should return frames. Defaults to True.}
+\PY{l+s+sd}{            seed (int, optional): the seed for the enviroment. Defaults to None.}
+
+\PY{l+s+sd}{        Returns:}
+\PY{l+s+sd}{            if return frames is True, returns the total reward and the frames}
+\PY{l+s+sd}{            if return frames is False, returns the total reward}
+\PY{l+s+sd}{        \PYZdq{}\PYZdq{}\PYZdq{}}
+        \PY{k}{if} \PY{n}{seed} \PY{o+ow}{is} \PY{o+ow}{not} \PY{k+kc}{None}\PY{p}{:}
+            \PY{n}{state}\PY{p}{,} \PY{n}{\PYZus{}} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env}\PY{o}{.}\PY{n}{reset}\PY{p}{(}\PY{n}{seed}\PY{o}{=}\PY{n}{seed}\PY{p}{)}
+        \PY{k}{else}\PY{p}{:}
+            \PY{n}{state}\PY{p}{,} \PY{n}{\PYZus{}} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env}\PY{o}{.}\PY{n}{reset}\PY{p}{(}\PY{p}{)}
+
+        \PY{n}{done} \PY{o}{=} \PY{k+kc}{False}
+        \PY{n}{total\PYZus{}reward} \PY{o}{=} \PY{l+m+mi}{0}
+        \PY{k}{if} \PY{n}{return\PYZus{}frames}\PY{p}{:}
+            \PY{n}{frames} \PY{o}{=} \PY{p}{[}\PY{p}{]}
+
+        \PY{k}{with} \PY{n}{torch}\PY{o}{.}\PY{n}{no\PYZus{}grad}\PY{p}{(}\PY{p}{)}\PY{p}{:}
+            \PY{k}{while} \PY{o+ow}{not} \PY{n}{done}\PY{p}{:}
+                \PY{n}{action} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{\PYZus{}sample\PYZus{}action}\PY{p}{(}\PY{n}{state}\PY{p}{,} \PY{n}{epsilon}\PY{p}{)}
+                \PY{n}{next\PYZus{}state}\PY{p}{,} \PY{n}{reward}\PY{p}{,} \PY{n}{terminated}\PY{p}{,} \PY{n}{truncated}\PY{p}{,} \PY{n}{\PYZus{}} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env}\PY{o}{.}\PY{n}{step}\PY{p}{(}\PY{n}{action}\PY{p}{)}
+                \PY{n}{total\PYZus{}reward} \PY{o}{+}\PY{o}{=} \PY{n}{reward}
+                \PY{n}{done} \PY{o}{=} \PY{n}{terminated} \PY{o+ow}{or} \PY{n}{truncated}
+                \PY{k}{if} \PY{n}{return\PYZus{}frames}\PY{p}{:}
+                    \PY{n}{frames}\PY{o}{.}\PY{n}{append}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env}\PY{o}{.}\PY{n}{render}\PY{p}{(}\PY{p}{)}\PY{p}{)}
+                \PY{n}{state} \PY{o}{=} \PY{n}{next\PYZus{}state}
+
+        \PY{k}{if} \PY{n}{return\PYZus{}frames}\PY{p}{:}
+            \PY{k}{return} \PY{n}{total\PYZus{}reward}\PY{p}{,} \PY{n}{frames}
+
+        \PY{k}{return} \PY{n}{total\PYZus{}reward}
+
+
+\PY{k}{class} \PY{n+nc}{HardUpdateDQN}\PY{p}{(}\PY{n}{DQN}\PY{p}{)}\PY{p}{:}
+    \PY{k}{def} \PY{n+nf+fm}{\PYZus{}\PYZus{}init\PYZus{}\PYZus{}}\PY{p}{(}
+        \PY{n+nb+bp}{self}\PY{p}{,} \PY{n}{env}\PY{p}{,} \PY{n}{model}\PY{p}{,} \PY{n}{model\PYZus{}kwargs}\PY{p}{:} \PY{n+nb}{dict} \PY{o}{=} \PY{p}{\PYZob{}}\PY{p}{\PYZcb{}}\PY{p}{,} \PY{n}{update\PYZus{}freq}\PY{p}{:} \PY{n+nb}{int} \PY{o}{=} \PY{l+m+mi}{5}\PY{p}{,} \PY{o}{*}\PY{n}{args}\PY{p}{,} \PY{o}{*}\PY{o}{*}\PY{n}{kwargs}
+    \PY{p}{)}\PY{p}{:}
+        \PY{n+nb}{super}\PY{p}{(}\PY{p}{)}\PY{o}{.}\PY{n+nf+fm}{\PYZus{}\PYZus{}init\PYZus{}\PYZus{}}\PY{p}{(}\PY{n}{env}\PY{p}{,} \PY{n}{model}\PY{p}{,} \PY{n}{model\PYZus{}kwargs}\PY{p}{,} \PY{o}{*}\PY{n}{args}\PY{p}{,} \PY{o}{*}\PY{o}{*}\PY{n}{kwargs}\PY{p}{)}
+        \PY{c+c1}{\PYZsh{} ========== YOUR CODE HERE ==========}
+        \PY{c+c1}{\PYZsh{} TODO:}
+        \PY{c+c1}{\PYZsh{} fill in the initialization and synchronization of the target model weights}
+        \PY{c+c1}{\PYZsh{} ====================================}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{target\PYZus{}model} \PY{o}{=} \PY{n}{model}\PY{p}{(}
+            \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{observation\PYZus{}space}\PY{p}{,} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{env}\PY{o}{.}\PY{n}{action\PYZus{}space}\PY{o}{.}\PY{n}{n}\PY{p}{,} \PY{o}{*}\PY{o}{*}\PY{n}{model\PYZus{}kwargs}
+        \PY{p}{)}\PY{o}{.}\PY{n}{to}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{device}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{update\PYZus{}freq} \PY{o}{=} \PY{n}{update\PYZus{}freq}
+        \PY{n}{wandb}\PY{o}{.}\PY{n}{config}\PY{o}{.}\PY{n}{update}\PY{p}{(}\PY{p}{\PYZob{}}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{update\PYZus{}freq}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{update\PYZus{}freq}\PY{p}{\PYZcb{}}\PY{p}{,} \PY{n}{allow\PYZus{}val\PYZus{}change}\PY{o}{=}\PY{k+kc}{True}\PY{p}{)}
+
+        \PY{c+c1}{\PYZsh{} ========== YOUR CODE ENDS ==========}
+
+    \PY{k}{def} \PY{n+nf}{\PYZus{}optimize\PYZus{}model}\PY{p}{(}\PY{n+nb+bp}{self}\PY{p}{)}\PY{p}{:}
+\PY{+w}{        }\PY{l+s+sd}{\PYZdq{}\PYZdq{}\PYZdq{}Optimizes the model}
+
+\PY{l+s+sd}{        Returns:}
+\PY{l+s+sd}{            bool: whether we have enough samples to optimize the model, which we define as having at least 10*batch\PYZus{}size samples}
+\PY{l+s+sd}{            float: the loss, if we do not have enough samples, we return 0}
+\PY{l+s+sd}{        \PYZdq{}\PYZdq{}\PYZdq{}}
+        \PY{c+c1}{\PYZsh{} ========== YOUR CODE HERE ==========}
+        \PY{c+c1}{\PYZsh{} TODO:}
+        \PY{c+c1}{\PYZsh{} hint: you can copy over most of the code from the parent class}
+        \PY{c+c1}{\PYZsh{} and only change one line}
+        \PY{c+c1}{\PYZsh{} ====================================}
+        \PY{k}{if} \PY{n+nb}{len}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{replay\PYZus{}buffer}\PY{p}{)} \PY{o}{\PYZlt{}} \PY{l+m+mi}{10} \PY{o}{*} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{batch\PYZus{}size}\PY{p}{:}
+            \PY{k}{return} \PY{k+kc}{False}\PY{p}{,} \PY{l+m+mi}{0}
+
+        \PY{n}{states}\PY{p}{,} \PY{n}{actions}\PY{p}{,} \PY{n}{rewards}\PY{p}{,} \PY{n}{next\PYZus{}states}\PY{p}{,} \PY{n}{dones} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{replay\PYZus{}buffer}\PY{o}{.}\PY{n}{sample}\PY{p}{(}
+            \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{batch\PYZus{}size}\PY{p}{,} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{device}
+        \PY{p}{)}
+
+        \PY{c+c1}{\PYZsh{} current q vals}
+        \PY{n}{q\PYZus{}values} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model}\PY{p}{(}\PY{n}{states}\PY{p}{)}
+        \PY{n}{q\PYZus{}values} \PY{o}{=} \PY{n}{q\PYZus{}values}\PY{o}{.}\PY{n}{gather}\PY{p}{(}\PY{n}{dim}\PY{o}{=}\PY{l+m+mi}{1}\PY{p}{,} \PY{n}{index}\PY{o}{=}\PY{n}{actions}\PY{o}{.}\PY{n}{unsqueeze}\PY{p}{(}\PY{l+m+mi}{1}\PY{p}{)}\PY{p}{)}\PY{o}{.}\PY{n}{squeeze}\PY{p}{(}\PY{p}{)}
+
+        \PY{c+c1}{\PYZsh{} next q vals}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{target\PYZus{}model}\PY{o}{.}\PY{n}{eval}\PY{p}{(}\PY{p}{)}
+        \PY{k}{with} \PY{n}{torch}\PY{o}{.}\PY{n}{no\PYZus{}grad}\PY{p}{(}\PY{p}{)}\PY{p}{:}
+            \PY{n}{next\PYZus{}q\PYZus{}values} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{target\PYZus{}model}\PY{p}{(}\PY{n}{next\PYZus{}states}\PY{p}{)}
+        \PY{n}{next\PYZus{}q\PYZus{}values} \PY{o}{=} \PY{n}{torch}\PY{o}{.}\PY{n}{max}\PY{p}{(}\PY{n}{next\PYZus{}q\PYZus{}values}\PY{p}{,} \PY{n}{dim}\PY{o}{=}\PY{l+m+mi}{1}\PY{p}{,} \PY{n}{keepdims}\PY{o}{=}\PY{k+kc}{True}\PY{p}{)}\PY{p}{[}\PY{l+m+mi}{0}\PY{p}{]}\PY{o}{.}\PY{n}{squeeze}\PY{p}{(}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{target\PYZus{}model}\PY{o}{.}\PY{n}{train}\PY{p}{(}\PY{p}{)}
+
+        \PY{n}{target\PYZus{}values} \PY{o}{=} \PY{n}{rewards} \PY{o}{+} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{gamma} \PY{o}{*} \PY{n}{next\PYZus{}q\PYZus{}values} \PY{o}{*} \PY{p}{(}\PY{o}{\PYZti{}}\PY{n}{dones}\PY{p}{)}
+        \PY{n}{loss} \PY{o}{=} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{loss\PYZus{}fn}\PY{p}{(}\PY{n+nb}{input}\PY{o}{=}\PY{n}{q\PYZus{}values}\PY{p}{,} \PY{n}{target}\PY{o}{=}\PY{n}{target\PYZus{}values}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{optimizer}\PY{o}{.}\PY{n}{zero\PYZus{}grad}\PY{p}{(}\PY{p}{)}
+        \PY{n}{loss}\PY{o}{.}\PY{n}{backward}\PY{p}{(}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{optimizer}\PY{o}{.}\PY{n}{step}\PY{p}{(}\PY{p}{)}
+
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{\PYZus{}update\PYZus{}model}\PY{p}{(}\PY{p}{)}
+
+        \PY{k}{return} \PY{k+kc}{True}\PY{p}{,} \PY{n}{loss}\PY{o}{.}\PY{n}{item}\PY{p}{(}\PY{p}{)}
+
+        \PY{c+c1}{\PYZsh{} ========== YOUR CODE ENDS ==========}
+
+    \PY{k}{def} \PY{n+nf}{\PYZus{}update\PYZus{}model}\PY{p}{(}\PY{n+nb+bp}{self}\PY{p}{)}\PY{p}{:}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{i\PYZus{}update} \PY{o}{+}\PY{o}{=} \PY{l+m+mi}{1}
+        \PY{k}{if} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{i\PYZus{}update} \PY{o}{\PYZpc{}} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{update\PYZus{}freq} \PY{o}{==} \PY{l+m+mi}{0}\PY{p}{:}
+            \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{target\PYZus{}model}\PY{o}{.}\PY{n}{load\PYZus{}state\PYZus{}dict}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model}\PY{o}{.}\PY{n}{state\PYZus{}dict}\PY{p}{(}\PY{p}{)}\PY{p}{)}
+
+    \PY{k}{def} \PY{n+nf}{\PYZus{}save}\PY{p}{(}\PY{n+nb+bp}{self}\PY{p}{,} \PY{n}{suffix}\PY{p}{:} \PY{n+nb}{str} \PY{o}{=} \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}\PY{p}{:}
+        \PY{n}{torch}\PY{o}{.}\PY{n}{save}\PY{p}{(}
+            \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model}\PY{o}{.}\PY{n}{state\PYZus{}dict}\PY{p}{(}\PY{p}{)}\PY{p}{,} \PY{n}{os}\PY{o}{.}\PY{n}{path}\PY{o}{.}\PY{n}{join}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{save\PYZus{}path}\PY{p}{,} \PY{l+s+sa}{f}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{model\PYZus{}}\PY{l+s+si}{\PYZob{}}\PY{n}{suffix}\PY{l+s+si}{\PYZcb{}}\PY{l+s+s2}{.pt}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}
+        \PY{p}{)}
+        \PY{n}{torch}\PY{o}{.}\PY{n}{save}\PY{p}{(}
+            \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{target\PYZus{}model}\PY{o}{.}\PY{n}{state\PYZus{}dict}\PY{p}{(}\PY{p}{)}\PY{p}{,}
+            \PY{n}{os}\PY{o}{.}\PY{n}{path}\PY{o}{.}\PY{n}{join}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{save\PYZus{}path}\PY{p}{,} \PY{l+s+sa}{f}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{target\PYZus{}model\PYZus{}}\PY{l+s+si}{\PYZob{}}\PY{n}{suffix}\PY{l+s+si}{\PYZcb{}}\PY{l+s+s2}{.pt}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}\PY{p}{,}
+        \PY{p}{)}
+
+    \PY{k}{def} \PY{n+nf}{load\PYZus{}model}\PY{p}{(}\PY{n+nb+bp}{self}\PY{p}{,} \PY{n}{suffix}\PY{p}{:} \PY{n+nb}{str} \PY{o}{=} \PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}\PY{p}{:}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model}\PY{o}{.}\PY{n}{load\PYZus{}state\PYZus{}dict}\PY{p}{(}
+            \PY{n}{torch}\PY{o}{.}\PY{n}{load}\PY{p}{(}\PY{n}{os}\PY{o}{.}\PY{n}{path}\PY{o}{.}\PY{n}{join}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{save\PYZus{}path}\PY{p}{,} \PY{l+s+sa}{f}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{model\PYZus{}}\PY{l+s+si}{\PYZob{}}\PY{n}{suffix}\PY{l+s+si}{\PYZcb{}}\PY{l+s+s2}{.pt}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}\PY{p}{)}
+        \PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{target\PYZus{}model}\PY{o}{.}\PY{n}{load\PYZus{}state\PYZus{}dict}\PY{p}{(}
+            \PY{n}{torch}\PY{o}{.}\PY{n}{load}\PY{p}{(}\PY{n}{os}\PY{o}{.}\PY{n}{path}\PY{o}{.}\PY{n}{join}\PY{p}{(}\PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{save\PYZus{}path}\PY{p}{,} \PY{l+s+sa}{f}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{target\PYZus{}model\PYZus{}}\PY{l+s+si}{\PYZob{}}\PY{n}{suffix}\PY{l+s+si}{\PYZcb{}}\PY{l+s+s2}{.pt}\PY{l+s+s2}{\PYZdq{}}\PY{p}{)}\PY{p}{)}
+        \PY{p}{)}
+
+
+\PY{k}{class} \PY{n+nc}{SoftUpdateDQN}\PY{p}{(}\PY{n}{HardUpdateDQN}\PY{p}{)}\PY{p}{:}
+    \PY{k}{def} \PY{n+nf+fm}{\PYZus{}\PYZus{}init\PYZus{}\PYZus{}}\PY{p}{(}
+        \PY{n+nb+bp}{self}\PY{p}{,} \PY{n}{env}\PY{p}{,} \PY{n}{model}\PY{p}{,} \PY{n}{model\PYZus{}kwargs}\PY{p}{:} \PY{n+nb}{dict} \PY{o}{=} \PY{p}{\PYZob{}}\PY{p}{\PYZcb{}}\PY{p}{,} \PY{n}{tau}\PY{p}{:} \PY{n+nb}{float} \PY{o}{=} \PY{l+m+mf}{0.01}\PY{p}{,} \PY{o}{*}\PY{n}{args}\PY{p}{,} \PY{o}{*}\PY{o}{*}\PY{n}{kwargs}
+    \PY{p}{)}\PY{p}{:}
+        \PY{n+nb}{super}\PY{p}{(}\PY{p}{)}\PY{o}{.}\PY{n+nf+fm}{\PYZus{}\PYZus{}init\PYZus{}\PYZus{}}\PY{p}{(}\PY{n}{env}\PY{p}{,} \PY{n}{model}\PY{p}{,} \PY{n}{model\PYZus{}kwargs}\PY{p}{,} \PY{o}{*}\PY{n}{args}\PY{p}{,} \PY{o}{*}\PY{o}{*}\PY{n}{kwargs}\PY{p}{)}
+        \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{tau} \PY{o}{=} \PY{n}{tau}
+
+        \PY{n}{wandb}\PY{o}{.}\PY{n}{config}\PY{o}{.}\PY{n}{update}\PY{p}{(}\PY{p}{\PYZob{}}\PY{l+s+s2}{\PYZdq{}}\PY{l+s+s2}{tau}\PY{l+s+s2}{\PYZdq{}}\PY{p}{:} \PY{n}{tau}\PY{p}{\PYZcb{}}\PY{p}{,} \PY{n}{allow\PYZus{}val\PYZus{}change}\PY{o}{=}\PY{k+kc}{True}\PY{p}{)}
+
+    \PY{k}{def} \PY{n+nf}{\PYZus{}update\PYZus{}model}\PY{p}{(}\PY{n+nb+bp}{self}\PY{p}{)}\PY{p}{:}
+\PY{+w}{        }\PY{l+s+sd}{\PYZdq{}\PYZdq{}\PYZdq{}}
+\PY{l+s+sd}{        Soft updates the target model}
+\PY{l+s+sd}{        \PYZdq{}\PYZdq{}\PYZdq{}}
+        \PY{c+c1}{\PYZsh{} ========== YOUR CODE HERE ==========}
+        \PY{c+c1}{\PYZsh{} TODO}
+        \PY{c+c1}{\PYZsh{} ====================================}
+        \PY{k}{for} \PY{n}{param}\PY{p}{,} \PY{n}{target\PYZus{}param} \PY{o+ow}{in} \PY{n+nb}{zip}\PY{p}{(}
+            \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{model}\PY{o}{.}\PY{n}{parameters}\PY{p}{(}\PY{p}{)}\PY{p}{,} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{target\PYZus{}model}\PY{o}{.}\PY{n}{parameters}\PY{p}{(}\PY{p}{)}
+        \PY{p}{)}\PY{p}{:}
+            \PY{n}{target\PYZus{}param}\PY{o}{.}\PY{n}{data}\PY{o}{.}\PY{n}{copy\PYZus{}}\PY{p}{(}
+                \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{tau} \PY{o}{*} \PY{n}{param}\PY{o}{.}\PY{n}{data} \PY{o}{+} \PY{p}{(}\PY{l+m+mi}{1} \PY{o}{\PYZhy{}} \PY{n+nb+bp}{self}\PY{o}{.}\PY{n}{tau}\PY{p}{)} \PY{o}{*} \PY{n}{target\PYZus{}param}\PY{o}{.}\PY{n}{data}
+            \PY{p}{)}
+
+        \PY{c+c1}{\PYZsh{} ========== YOUR CODE ENDS ==========}
+\end{Verbatim}
+
+\newpage
+\end{document}

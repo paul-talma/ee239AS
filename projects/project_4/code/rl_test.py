@@ -19,11 +19,11 @@ def test_model_DQN(model):
         model = model((4, 84, 84), 5)
 
         model.load_state_dict(
-            torch.load("test_weights.pt", map_location="cpu", weights_only=False)
+            torch.load(".tests/test_weights.pt", map_location="cpu", weights_only=False)
         )
         # Test the forward function
         test_outputs = torch.load(
-            f"test_outputs{suffix}.pt",
+            f".tests/test_outputs{suffix}.pt",
             map_location=torch.device("cpu"),
             weights_only=False,
         )
@@ -32,6 +32,8 @@ def test_model_DQN(model):
         model.eval()
         with torch.no_grad():
             for i in range(len(test_inputs)):
+                x = (model(torch.tensor(test_inputs[i]).float().unsqueeze(0)),)
+                y = torch.tensor(test_outputs[i])
                 assert torch.allclose(
                     model(torch.tensor(test_inputs[i]).float().unsqueeze(0)),
                     torch.tensor(test_outputs[i]),
@@ -58,7 +60,7 @@ def test_wrapper(wrapper):
 
         # Test the reset function
         test_outputs = torch.load(
-            f"test_outputs_v3{suffix}.pt",
+            f".tests/test_outputs_v3{suffix}.pt",
             map_location=torch.device("cpu"),
             weights_only=False,
         )
@@ -96,10 +98,10 @@ def check_same_torch(a, b):
 
 
 def test_DQN_replay_buffer(buffer_class):
-    with open(f"test_replay_buffer_inputs{suffix}.pkl", "rb") as f:
+    with open(f".tests/test_replay_buffer_inputs{suffix}.pkl", "rb") as f:
         buffer_inputs = pickle.load(f)
     buffer_samples = torch.load(
-        f"test_replay_buffer_samples{suffix}.pth", weights_only=False
+        f".tests/test_replay_buffer_samples{suffix}.pth", weights_only=False
     )
     try:
         buffer = buffer_class(40, seed=42)

@@ -2,6 +2,14 @@ import torch
 import random
 import numpy as np
 
+# device = torch.device(
+#     "cuda"
+#     if torch.cuda.is_available()
+#     else "mps"
+#     if torch.mps.is_available()
+#     else "cpu"
+# )
+
 
 class ReplayBufferDQN:
     def __init__(self, buffer_size: int, seed: int = 42):
@@ -63,11 +71,14 @@ class ReplayBufferDQN:
         states, actions, rewards, next_states, dones = zip(
             *samples
         )  # transpose samples
-        states = torch.tensor(states, dtype=torch.float32, device=device)
-        actions = torch.tensor(actions, dtype=torch.int64, device=device)
-        rewards = torch.tensor(rewards, dtype=torch.float32, device=device)
-        next_states = torch.tensor(next_states, dtype=torch.float32, device=device)
-        dones = torch.tensor(dones, dtype=torch.bool, device=device)
+
+        states = torch.tensor(np.stack(states), dtype=torch.float32, device=device)
+        actions = torch.tensor(np.stack(actions), dtype=torch.int64, device=device)
+        rewards = torch.tensor(np.stack(rewards), dtype=torch.float32, device=device)
+        next_states = torch.tensor(
+            np.stack(next_states), dtype=torch.float32, device=device
+        )
+        dones = torch.tensor(np.stack(dones), dtype=torch.bool, device=device)
 
         # ========== YOUR CODE ENDS ==========
 
